@@ -22,6 +22,7 @@ export function generateDeviceJsonTemplate(device, company, location) {
   if (device.deviceType === 'sensor') {
     return {
       ...base,
+      subtype: device.subtype ?? '',
       data: {
         value: String(device.value ?? 0),
         unit: device.unit ?? '',

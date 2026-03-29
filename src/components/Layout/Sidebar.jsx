@@ -1,7 +1,10 @@
+import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { X } from 'lucide-react'
 
 export default function Sidebar({ menuItems, collapsed, mobileOpen, onClose }) {
+  const [logoErr, setLogoErr] = useState(false)
+
   return (
     <aside
       className={`
@@ -14,9 +17,9 @@ export default function Sidebar({ menuItems, collapsed, mobileOpen, onClose }) {
       {/* Logo */}
       <div className="flex items-center justify-between px-4 py-5 border-b border-gray-700">
         {!collapsed && (
-          <span className="text-lg font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
-            SCADA UI
-          </span>
+          logoErr
+            ? <span className="text-lg font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">SCADA UI</span>
+            : <img src="/logo/logo.png" alt="Logo" className="h-14 object-contain" onError={() => setLogoErr(true)} />
         )}
         <button onClick={onClose} className="lg:hidden text-gray-400 hover:text-white">
           <X size={20} />

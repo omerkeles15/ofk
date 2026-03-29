@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Trash2, Filter, AlertTriangle, BarChart2, Cpu, HelpCircle } from 'lucide-react'
+import { ArrowLeft, Trash2, Filter, AlertTriangle, BarChart2, Cpu, HelpCircle, RefreshCw } from 'lucide-react'
 import AppLayout from '../../components/Layout/AppLayout'
 import Modal from '../../components/Modal'
 import DeviceJsonInfoModal from '../../components/DeviceJsonInfoModal'
@@ -8,8 +8,10 @@ import IOPointHistoryPanel from '../../components/IOPointHistoryPanel'
 import { useCompanyStore } from '../../features/company/companyStore'
 import { useAuth } from '../../hooks/useAuth'
 import { getDeltaXAddresses, getDeltaYAddresses, DATA_TYPES } from '../../features/device/deviceCatalog'
+import { fetchDeviceData, clearDeviceHistory as apiClearHistory } from '../../features/device/deviceApi'
 
-const PAGE_SIZE_OPTIONS = [50, 100, 200]
+const PAGE_SIZE_OPTIONS = [100, 200, 300]
+const POLL_INTERVAL = 5000
 const ADMIN_PASSWORD = 'admin123'
 
 function DateTimeInput({ label, value, onChange }) {
@@ -22,21 +24,121 @@ function DateTimeInput({ label, value, onChange }) {
   )
 }
 
-function SensorView({ device, history, filtered, paginated }) {
+function SensorView({ device, deviceId, isAdmin }) {
+  const [records, setRecords] = useState([])
+  const [total, setTotal] = useState(0)
+  const [filtered, setFiltered] = useState(0)
+  const [latest, setLatest] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [pageSize, setPageSize] = useState(100)
+  const [filterFrom, setFilterFrom] = useState('')
+  const [filterTo, setFilterTo] = useState('')
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deleteMode, setDeleteMode] = useState('all')
+  const [password, setPassword] = useState('')
+  const [pwError, setPwError] = useState('')
+
+  const loadData = useCallback(async () => {
+    try {
+      const opts = { limit: pageSize }
+      if (filterFrom) opts.from = filterFrom
+      if (filterTo) opts.to = filterTo
+      const res = await fetchDeviceData(deviceId, opts)
+      setRecords(res.records ?? [])
+      setTotal(res.total ?? 0)
+      setFiltered(res.filtered ?? res.total ?? 0)
+      setLatest(res.latest ?? null)
+      setLoading(false)
+    } catch {
+      setLoading(false)
+    }
+  }, [deviceId, pageSize, filterFrom, filterTo])
+
+  useEffect(() => {
+    let active = true
+    const poll = () => { if (active) loadData() }
+    poll()
+    const interval = setInterval(poll, POLL_INTERVAL)
+    return () => { active = false; clearInterval(interval) }
+  }, [loadData])
+
+  const handleDelete = async (e) => {
+    e.preventDefault()
+    setPwError('')
+    if (password !== ADMIN_PASSWORD) { setPwError('Şifre hatalı'); return }
+    const opts = {}
+    if (deleteMode === 'range') {
+      if (!filterFrom && !filterTo) { setPwError('Tarih aralığı seçilmemiş'); return }
+      if (filterFrom) opts.from = filterFrom
+      if (filterTo) opts.to = filterTo
+    }
+    await apiClearHistory(deviceId, opts)
+    setPassword('')
+    setShowDeleteModal(false)
+    loadData()
+  }
+
+  const latestValue = latest?.data?.value ?? '-'
+  const latestUnit = latest?.data?.unit ?? device.unit ?? ''
+  const latestStatus = latest?.data?.status ?? 'offline'
+
+  if (loading) return <p className="text-gray-400 text-sm py-8 text-center">Veriler yükleniyor...</p>
+
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
         {[
-          { label: 'Son Değer', value: `${device.value} ${device.unit}` },
-          { label: 'Toplam Kayıt', value: history.length },
-          { label: 'Filtreli Kayıt', value: filtered.length },
-          { label: 'Gösterilen', value: paginated.length },
+          { label: 'Son Değer', value: `${latestValue} ${latestUnit}` },
+          { label: 'Durum', value: latestStatus === 'online' ? '🟢 Online' : '🔴 Offline' },
+          { label: 'Toplam Kayıt', value: total },
+          { label: 'Filtreli', value: filtered },
+          { label: 'Gösterilen', value: records.length },
         ].map(({ label, value }) => (
           <div key={label} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
             <p className="text-xs text-gray-400 mb-1">{label}</p>
             <p className="text-xl font-bold text-gray-800">{value}</p>
           </div>
         ))}
+      </div>
+      <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-xl">
+        <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+        <span className="text-xs text-blue-600 font-medium">Canlı veri — {POLL_INTERVAL / 1000} saniyede bir güncelleniyor</span>
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <Filter size={15} /><span className="font-medium">Filtrele</span>
+          </div>
+          <DateTimeInput label="Başlangıç" value={filterFrom} onChange={setFilterFrom} />
+          <DateTimeInput label="Bitiş" value={filterTo} onChange={setFilterTo} />
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500">Göster</label>
+            <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}
+              className="px-3 py-1.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>İlk {n} kayıt</option>)}
+            </select>
+          </div>
+          <button onClick={() => { setFilterFrom(''); setFilterTo('') }}
+            className="px-3 py-1.5 border border-gray-200 rounded-xl text-sm hover:bg-gray-50 mt-auto">Temizle</button>
+          <button onClick={loadData}
+            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-600 mt-auto" title="Yenile">
+            <RefreshCw size={16} />
+          </button>
+          {isAdmin && (
+            <div className="ml-auto flex gap-2 mt-auto">
+              {(filterFrom || filterTo) && (
+                <button onClick={() => { setDeleteMode('range'); setPassword(''); setPwError(''); setShowDeleteModal(true) }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 border border-orange-200 text-orange-600 rounded-xl text-sm hover:bg-orange-50">
+                  <Trash2 size={13} /> Seçili Aralığı Sil
+                </button>
+              )}
+              <button onClick={() => { setDeleteMode('all'); setPassword(''); setPwError(''); setShowDeleteModal(true) }}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-red-200 text-red-600 rounded-xl text-sm hover:bg-red-50">
+                <Trash2 size={13} /> Tüm Geçmişi Sil
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm">
         <table className="w-full text-sm">
@@ -45,28 +147,61 @@ function SensorView({ device, history, filtered, paginated }) {
               <th className="text-left px-4 py-3 font-medium text-gray-500">#</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">Değer</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">Birim</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-500">Durum</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">Tarih</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">Saat</th>
             </tr>
           </thead>
           <tbody>
-            {paginated.length === 0 ? (
-              <tr><td colSpan={5} className="text-center py-12 text-gray-400">Kayıt bulunamadı</td></tr>
-            ) : paginated.map((r, i) => {
-              const dt = new Date(r.timestamp)
+            {records.length === 0 ? (
+              <tr><td colSpan={6} className="text-center py-12 text-gray-400">Henüz veri gelmedi</td></tr>
+            ) : records.map((r, i) => {
+              const dt = new Date(r.timestamp || r.receivedAt)
               return (
                 <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
                   <td className="px-4 py-2.5 text-gray-400 text-xs">{i + 1}</td>
-                  <td className="px-4 py-2.5 font-semibold text-gray-800">{r.value}</td>
-                  <td className="px-4 py-2.5 text-gray-500">{r.unit}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{dt.toLocaleDateString('tr-TR')}</td>
-                  <td className="px-4 py-2.5 text-gray-600 font-mono text-xs">{dt.toLocaleTimeString('tr-TR')}</td>
+                  <td className="px-4 py-2.5 font-semibold text-gray-800">{r.data?.value ?? '-'}</td>
+                  <td className="px-4 py-2.5 text-gray-500">{r.data?.unit ?? ''}</td>
+                  <td className="px-4 py-2.5">
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${r.data?.status === 'online' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                      {r.data?.status === 'online' ? 'Online' : 'Offline'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-gray-600">{isNaN(dt) ? '-' : dt.toLocaleDateString('tr-TR')}</td>
+                  <td className="px-4 py-2.5 text-gray-600 font-mono text-xs">{isNaN(dt) ? '-' : dt.toLocaleTimeString('tr-TR')}</td>
                 </tr>
               )
             })}
           </tbody>
         </table>
       </div>
+      {showDeleteModal && (
+        <Modal title={deleteMode === 'all' ? 'Tüm Geçmişi Sil' : 'Seçili Aralığı Sil'} onClose={() => setShowDeleteModal(false)}>
+          <form onSubmit={handleDelete} className="space-y-4">
+            <div className="flex items-start gap-3 p-3 bg-red-50 rounded-xl">
+              <AlertTriangle size={18} className="text-red-500 shrink-0 mt-0.5" />
+              <p className="text-sm text-red-700">
+                {deleteMode === 'all'
+                  ? `"${device.tagName}" cihazına ait tüm geçmiş veriler silinecek.`
+                  : 'Seçili aralıktaki veriler silinecek.'} Bu işlem geri alınamaz.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Admin şifrenizi girin</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                placeholder="••••••••" autoFocus />
+            </div>
+            {pwError && <p className="text-red-500 text-sm">{pwError}</p>}
+            <div className="flex gap-3 pt-1">
+              <button type="button" onClick={() => setShowDeleteModal(false)}
+                className="flex-1 py-2 rounded-xl border border-gray-200 text-sm">İptal</button>
+              <button type="submit"
+                className="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-medium">Sil</button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -409,38 +544,9 @@ export default function DeviceHistoryPage({ menuItems }) {
     return values
   }, [isPLC, ioHistory, deviceId])
 
-  const [pageSize, setPageSize] = useState(50)
-  const [filterFrom, setFilterFrom] = useState('')
-  const [filterTo, setFilterTo] = useState('')
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
-  const [deleteMode, setDeleteMode] = useState('all')
-  const [password, setPassword] = useState('')
-  const [pwError, setPwError] = useState('')
   const [plcDirty, setPlcDirty] = useState(false)
   const [showPlcLeaveWarning, setShowPlcLeaveWarning] = useState(false)
   const [showJsonModal, setShowJsonModal] = useState(false)
-
-  const filtered = useMemo(() => {
-    let data = [...history].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-    if (filterFrom) data = data.filter((r) => new Date(r.timestamp) >= new Date(filterFrom))
-    if (filterTo) data = data.filter((r) => new Date(r.timestamp) <= new Date(filterTo))
-    return data
-  }, [history, filterFrom, filterTo])
-
-  const paginated = filtered.slice(0, pageSize)
-
-  const handleDelete = (e) => {
-    e.preventDefault()
-    setPwError('')
-    if (password !== ADMIN_PASSWORD) { setPwError('Şifre hatalı'); return }
-    if (deleteMode === 'all') { clearHistory(deviceId) }
-    else {
-      if (!filterFrom && !filterTo) { setPwError('Tarih aralığı seçilmemiş'); return }
-      deleteHistoryRange(deviceId, filterFrom || '0', filterTo || '9999')
-    }
-    setPassword('')
-    setShowDeleteModal(false)
-  }
 
   const handleGoBack = () => {
     if (isPLC && plcDirty && isAdmin) { setShowPlcLeaveWarning(true) }
@@ -493,41 +599,7 @@ export default function DeviceHistoryPage({ menuItems }) {
         </div>
 
         {!isPLC ? (
-          <>
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <Filter size={15} /><span className="font-medium">Filtrele</span>
-                </div>
-                <DateTimeInput label="Başlangıç" value={filterFrom} onChange={setFilterFrom} />
-                <DateTimeInput label="Bitiş" value={filterTo} onChange={setFilterTo} />
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-gray-500">Göster</label>
-                  <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}
-                    className="px-3 py-1.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>İlk {n} kayıt</option>)}
-                  </select>
-                </div>
-                <button onClick={() => { setFilterFrom(''); setFilterTo('') }}
-                  className="px-3 py-1.5 border border-gray-200 rounded-xl text-sm hover:bg-gray-50 mt-auto">Temizle</button>
-                {isAdmin && (
-                  <div className="ml-auto flex gap-2 mt-auto">
-                    {(filterFrom || filterTo) && (
-                      <button onClick={() => { setDeleteMode('range'); setPassword(''); setPwError(''); setShowDeleteModal(true) }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 border border-orange-200 text-orange-600 rounded-xl text-sm hover:bg-orange-50">
-                        <Trash2 size={13} /> Seçili Aralığı Sil
-                      </button>
-                    )}
-                    <button onClick={() => { setDeleteMode('all'); setPassword(''); setPwError(''); setShowDeleteModal(true) }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 border border-red-200 text-red-600 rounded-xl text-sm hover:bg-red-50">
-                      <Trash2 size={13} /> Tüm Geçmişi Sil
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-            <SensorView device={device} history={history} filtered={filtered} paginated={paginated} />
-          </>
+            <SensorView device={device} deviceId={deviceId} isAdmin={isAdmin} />
         ) : (
           <PlcViewInner
             key={device.id}
@@ -549,34 +621,6 @@ export default function DeviceHistoryPage({ menuItems }) {
           </div>
         )}
       </div>
-
-      {showDeleteModal && (
-        <Modal title={deleteMode === 'all' ? 'Tüm Geçmişi Sil' : 'Seçili Aralığı Sil'} onClose={() => setShowDeleteModal(false)}>
-          <form onSubmit={handleDelete} className="space-y-4">
-            <div className="flex items-start gap-3 p-3 bg-red-50 rounded-xl">
-              <AlertTriangle size={18} className="text-red-500 shrink-0 mt-0.5" />
-              <p className="text-sm text-red-700">
-                {deleteMode === 'all'
-                  ? `"${device.tagName}" cihazına ait tüm geçmiş veriler silinecek.`
-                  : 'Seçili aralıktaki veriler silinecek.'} Bu işlem geri alınamaz.
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Admin şifrenizi girin</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
-                placeholder="••••••••" autoFocus />
-            </div>
-            {pwError && <p className="text-red-500 text-sm">{pwError}</p>}
-            <div className="flex gap-3 pt-1">
-              <button type="button" onClick={() => setShowDeleteModal(false)}
-                className="flex-1 py-2 rounded-xl border border-gray-200 text-sm">İptal</button>
-              <button type="submit"
-                className="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-medium">Sil</button>
-            </div>
-          </form>
-        </Modal>
-      )}
 
       {showPlcLeaveWarning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">

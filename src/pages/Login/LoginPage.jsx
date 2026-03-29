@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
-import { Eye, EyeOff, Zap } from 'lucide-react'
+import { Eye, EyeOff } from 'lucide-react'
 
 export default function LoginPage() {
   const [form, setForm] = useState({ username: '', password: '' })
@@ -26,12 +26,17 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-blue-950 to-gray-900 p-4">
-      <div className="w-full max-w-sm">
+    <div className="min-h-screen flex items-center justify-center bg-[#0a1628] p-4">
+      <div className="w-full max-w-md sm:max-w-sm">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-600 mb-4">
-            <Zap size={28} className="text-white" />
+          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 mb-5 inline-block">
+            <img
+              src="/logo/logo.png"
+              alt="Logo"
+              className="mx-auto w-80 sm:w-96 object-contain"
+              onError={(e) => { e.target.style.display = 'none' }}
+            />
           </div>
           <h1 className="text-2xl font-bold text-white">SCADA Dashboard</h1>
           <p className="text-gray-400 text-sm mt-1">Sisteme giriş yapın</p>
@@ -41,9 +46,7 @@ export default function LoginPage() {
         <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/10">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">
-                Kullanıcı Adı
-              </label>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Kullanıcı Adı</label>
               <input
                 type="text"
                 value={form.username}
@@ -53,11 +56,8 @@ export default function LoginPage() {
                 required
               />
             </div>
-
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">
-                Şifre
-              </label>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Şifre</label>
               <div className="relative">
                 <input
                   type={showPass ? 'text' : 'password'}
@@ -76,11 +76,9 @@ export default function LoginPage() {
                 </button>
               </div>
             </div>
-
             {error && (
               <p className="text-red-400 text-sm bg-red-500/10 px-3 py-2 rounded-lg">{error}</p>
             )}
-
             <button
               type="submit"
               disabled={loading}
@@ -89,17 +87,6 @@ export default function LoginPage() {
               {loading ? 'Giriş yapılıyor...' : 'Giriş Yap'}
             </button>
           </form>
-
-          {/* Test hesapları */}
-          <div className="mt-5 pt-4 border-t border-white/10">
-            <p className="text-xs text-gray-500 mb-2">Test hesapları:</p>
-            <div className="grid grid-cols-2 gap-1.5 text-xs text-gray-400">
-              <span>admin / admin123</span>
-              <span>firma1 / firma123</span>
-              <span>lokasyon1 / lok123</span>
-              <span>kullanici1 / kul123</span>
-            </div>
-          </div>
         </div>
       </div>
     </div>
