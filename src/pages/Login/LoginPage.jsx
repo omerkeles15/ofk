@@ -16,10 +16,10 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      const redirect = login(form.username, form.password)
+      const redirect = await login(form.username, form.password)
       navigate(redirect)
     } catch (err) {
-      setError(err.message)
+      setError(err.response?.data?.detail || err.message)
     } finally {
       setLoading(false)
     }

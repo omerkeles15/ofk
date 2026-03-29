@@ -40,6 +40,12 @@ function SensorView({ device, deviceId, isAdmin }) {
   const [wsConnected, setWsConnected] = useState(false)
   const wsRef = useRef(null)
   const retryRef = useRef(null)
+  const filterRef = useRef({ from: '', to: '' })
+  const pageSizeRef = useRef(100)
+
+  // Ref'leri güncel tut
+  useEffect(() => { filterRef.current = { from: filterFrom, to: filterTo } }, [filterFrom, filterTo])
+  useEffect(() => { pageSizeRef.current = pageSize }, [pageSize])
 
   // HTTP ile veri çek (ilk yükleme + filtre değişikliği)
   const loadData = useCallback(async () => {
@@ -58,10 +64,10 @@ function SensorView({ device, deviceId, isAdmin }) {
     }
   }, [deviceId, pageSize, filterFrom, filterTo])
 
-  // İlk yükleme
+  // İlk yükleme + filtre değişikliğinde yeniden çek
   useEffect(() => { loadData() }, [loadData])
 
-  // WebSocket bağlantısı — canlı veri anında gelir
+  // WebSocket bağlantısı — sadece deviceId değiştiğinde yeniden bağlan
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${protocol}//${window.location.host}/ws/device/${deviceId}`
@@ -79,12 +85,14 @@ function SensorView({ device, deviceId, isAdmin }) {
           const msg = JSON.parse(event.data)
           if (msg.type === 'new_data' && msg.record) {
             const r = msg.record
-            // Filtre aktifse ve kayıt filtre dışındaysa tabloya ekleme
             const ts = r.timestamp || r.receivedAt || ''
-            if (filterFrom && ts < filterFrom) return
-            if (filterTo && ts > filterTo) return
+            const f = filterRef.current
 
-            setRecords((prev) => [r, ...prev].slice(0, pageSize))
+            // Filtre aktifse ve kayıt filtre dışındaysa tabloya ekleme
+            if (f.from && ts < f.from) return
+            if (f.to && ts > f.to) return
+
+            setRecords((prev) => [r, ...prev].slice(0, pageSizeRef.current))
             setTotal((prev) => prev + 1)
             setFiltered((prev) => prev + 1)
             setLatest(r)
@@ -110,7 +118,7 @@ function SensorView({ device, deviceId, isAdmin }) {
         wsRef.current.close()
       }
     }
-  }, [deviceId, filterFrom, filterTo, pageSize])
+  }, [deviceId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDelete = async (e) => {
     e.preventDefault()
