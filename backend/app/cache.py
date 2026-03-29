@@ -41,3 +41,32 @@ async def cache_delete(pattern: str):
         keys.append(key)
     if keys:
         await r.delete(*keys)
+
+
+async def publish(channel: str, data: dict):
+    """Redis Pub/Sub ile mesaj yayınla — multi-worker senkronizasyonu için."""
+    r = await get_redis()
+    if not r:
+        return
+    await r.publish(channel, json.dumps(data, ensure_ascii=False))
+
+
+async def buffer_push(device_id: str, record: dict):
+    """Veriyi Redis buffer listesine ekle — batch insert için."""
+    r = await get_redis()
+    if not r:
+        return False
+    await r.rpush("device_data_buffer", json.dumps(record, ensure_ascii=False))
+    return True
+
+
+async def buffer_pop_batch(count: int = 500):
+    """Buffer'dan toplu veri çek."""
+    r = await get_redis()
+    if not r:
+        return []
+    pipe = r.pipeline()
+    pipe.lrange("device_data_buffer", 0, count - 1)
+    pipe.ltrim("device_data_buffer", count, -1)
+    results = await pipe.execute()
+    return [json.loads(item) for item in results[0]]

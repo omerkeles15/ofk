@@ -22,9 +22,10 @@ class Settings(BaseSettings):
     app_name: str = "OFK SCADA"
     debug: bool = False
 
-    # Frontend dist
-    dist_dir: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist")
-    logo_dir: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "public", "logo")
+    # Frontend dist — backend/app/ → backend/ → proje kökü
+    _root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    dist_dir: str = os.path.join(_root, "dist")
+    logo_dir: str = os.path.join(_root, "public", "logo")
 
     class Config:
         env_file = ".env"

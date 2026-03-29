@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text, delete
+from sqlalchemy import select, func, delete
 from typing import Optional
 from datetime import datetime
 import json
@@ -9,46 +9,60 @@ from app.database import get_db
 from app.models import DeviceData
 from app.schemas import DeviceDataPayload
 from app.ws_manager import manager
-from app.cache import cache_get, cache_set, cache_delete
+from app.cache import cache_get, cache_set, cache_delete, buffer_push
 
 router = APIRouter(prefix="/api", tags=["device-data"])
 
 
 @router.post("/device-data")
-async def receive_device_data(payload: DeviceDataPayload, db: AsyncSession = Depends(get_db)):
-    """IoT cihazdan gelen veriyi PostgreSQL'e yazar ve WebSocket ile push yapar."""
-    now = datetime.now()
-    record = DeviceData(
-        device_id=payload.deviceId,
-        company_id=payload.companyId,
-        location_id=payload.locationId,
-        timestamp=payload.timestamp,
-        type=payload.type,
-        subtype=payload.subtype,
-        data_json=json.dumps(payload.data, ensure_ascii=False) if payload.data else None,
-        received_at=now,
-    )
-    db.add(record)
-    await db.commit()
+async def receive_device_data(payload: DeviceDataPayload):
+    """
+    IoT cihazdan gelen veri akışı:
+    1. Redis buffer'a yaz (mikrosaniye)
+    2. Redis Pub/Sub ile tüm worker'lara bildir
+    3. WebSocket ile izleyen kullanıcılara anında push
+    4. Arka planda batch worker buffer'ı PostgreSQL'e yazar
+    """
+    now = datetime.now().isoformat()
 
-    # Cache invalidate
-    await cache_delete(f"device:{payload.deviceId}:*")
+    record = {
+        "device_id": payload.deviceId,
+        "company_id": payload.companyId,
+        "location_id": payload.locationId,
+        "timestamp": payload.timestamp,
+        "type": payload.type,
+        "subtype": payload.subtype,
+        "data_json": json.dumps(payload.data, ensure_ascii=False) if payload.data else None,
+        "received_at": now,
+    }
 
-    # WebSocket push — sadece bu cihazı izleyenlere
+    # 1. Redis buffer'a ekle (batch insert için)
+    buffered = await buffer_push(payload.deviceId, record)
+
+    # Buffer çalışmazsa doğrudan DB'ye yaz (fallback)
+    if not buffered:
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            db.add(DeviceData(**record))
+            await db.commit()
+
+    # 2. WebSocket push — anında tüm izleyicilere
     ws_data = {
         "type": "new_data",
-        "deviceId": payload.deviceId,
         "record": {
-            "id": record.id,
-            "deviceId": record.device_id,
-            "timestamp": record.timestamp,
+            "deviceId": payload.deviceId,
+            "companyId": payload.companyId,
+            "locationId": payload.locationId,
+            "timestamp": payload.timestamp,
+            "type": payload.type,
+            "subtype": payload.subtype,
             "data": payload.data,
-            "receivedAt": now.isoformat(),
+            "receivedAt": now,
         },
     }
-    await manager.broadcast(payload.deviceId, ws_data)
+    await manager.publish_and_broadcast(payload.deviceId, ws_data)
 
-    return {"ok": True, "receivedAt": now.isoformat()}
+    return {"ok": True, "receivedAt": now}
 
 
 @router.get("/device-data/{device_id}")
@@ -60,46 +74,33 @@ async def get_device_data(
     to_ts: Optional[str] = Query(None, alias="to"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Sayfalı ve filtreli cihaz verisi döndürür."""
-    # Cache key
+    # Cache
     cache_key = f"device:{device_id}:L{limit}:O{offset}:F{from_ts}:T{to_ts}"
     cached = await cache_get(cache_key)
     if cached:
         return cached
 
-    # Filtreli sorgu
     where = [DeviceData.device_id == device_id]
     if from_ts:
         where.append(DeviceData.timestamp >= from_ts)
     if to_ts:
         where.append(DeviceData.timestamp <= to_ts)
 
-    # Filtreli toplam
-    filtered_q = select(func.count()).select_from(DeviceData).where(*where)
-    filtered_total = (await db.execute(filtered_q)).scalar()
+    filtered_total = (await db.execute(
+        select(func.count()).select_from(DeviceData).where(*where)
+    )).scalar()
 
-    # Genel toplam (filtresiz)
-    grand_q = select(func.count()).select_from(DeviceData).where(DeviceData.device_id == device_id)
-    grand_total = (await db.execute(grand_q)).scalar()
+    grand_total = (await db.execute(
+        select(func.count()).select_from(DeviceData).where(DeviceData.device_id == device_id)
+    )).scalar()
 
-    # Kayıtlar
-    data_q = (
-        select(DeviceData)
-        .where(*where)
-        .order_by(DeviceData.timestamp.desc())
-        .limit(limit)
-        .offset(offset)
-    )
-    rows = (await db.execute(data_q)).scalars().all()
+    rows = (await db.execute(
+        select(DeviceData).where(*where).order_by(DeviceData.timestamp.desc()).limit(limit).offset(offset)
+    )).scalars().all()
 
-    # En son kayıt (filtresiz)
-    latest_q = (
-        select(DeviceData)
-        .where(DeviceData.device_id == device_id)
-        .order_by(DeviceData.timestamp.desc())
-        .limit(1)
-    )
-    latest_row = (await db.execute(latest_q)).scalar_one_or_none()
+    latest_row = (await db.execute(
+        select(DeviceData).where(DeviceData.device_id == device_id).order_by(DeviceData.timestamp.desc()).limit(1)
+    )).scalar_one_or_none()
 
     def to_dict(r):
         return {
@@ -138,7 +139,6 @@ async def clear_device_history(
         where.append(DeviceData.timestamp >= from_ts)
     if to_ts:
         where.append(DeviceData.timestamp <= to_ts)
-
     result = await db.execute(delete(DeviceData).where(*where))
     await db.commit()
     await cache_delete(f"device:{device_id}:*")
@@ -162,22 +162,13 @@ async def get_device_stats(device_id: str, db: AsyncSession = Depends(get_db)):
     }
 
 
-# ── WebSocket — Canlı Veri İzleme ────────────────────────────
 @router.websocket("/ws/device/{device_id}")
 async def ws_device_live(websocket: WebSocket, device_id: str):
-    """
-    Client bu endpoint'e bağlanır, device_id'ye subscribe olur.
-    Yeni veri geldiğinde otomatik push alır.
-    Polling'e gerek kalmaz.
-    """
     await manager.subscribe(websocket, device_id)
     try:
         while True:
-            # Client'tan gelen mesajları dinle (ping/pong veya unsubscribe)
-            data = await websocket.receive_text()
-            if data == "close":
-                break
+            await websocket.receive_text()
     except WebSocketDisconnect:
         pass
     finally:
-        await manager.unsubscribe(websocket, device_id)
+        manager.unsubscribe(websocket, device_id)
