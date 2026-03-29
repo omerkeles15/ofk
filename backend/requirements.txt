@@ -1,3 +1,11 @@
 fastapi
 uvicorn[standard]
 pydantic
+pydantic-settings
+asyncpg
+sqlalchemy[asyncio]
+redis
+websockets
+python-jose[cryptography]
+passlib[bcrypt]
+alembic

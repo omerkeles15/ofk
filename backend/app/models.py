@@ -1,0 +1,81 @@
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Index, JSON
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from app.database import Base
+
+
+class Company(Base):
+    __tablename__ = "companies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    display_name = Column(String(200), nullable=False)
+    full_name = Column(String(500))
+    managers = Column(JSON, default=list)
+    created_at = Column(DateTime, server_default=func.now())
+
+    locations = relationship("Location", back_populates="company", cascade="all, delete-orphan")
+
+
+class Location(Base):
+    __tablename__ = "locations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(200), nullable=False)
+    managers = Column(JSON, default=list)
+    users = Column(JSON, default=list)
+    created_at = Column(DateTime, server_default=func.now())
+
+    company = relationship("Company", back_populates="locations")
+    devices = relationship("Device", back_populates="location", cascade="all, delete-orphan")
+
+
+class Device(Base):
+    __tablename__ = "devices"
+
+    id = Column(String(20), primary_key=True)  # DEV-001
+    location_id = Column(Integer, ForeignKey("locations.id", ondelete="CASCADE"), nullable=False)
+    tag_name = Column(String(200), nullable=False)
+    device_type = Column(String(50))  # sensor, plc
+    subtype = Column(String(50))
+    unit = Column(String(20), default="")
+    value = Column(Float, default=0)
+    status = Column(String(20), default="offline")
+    modbus_config = Column(JSON)
+    plc_io_config = Column(JSON)
+    io_tags = Column(JSON)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    location = relationship("Location", back_populates="devices")
+
+
+class DeviceData(Base):
+    __tablename__ = "device_data"
+    __table_args__ = (
+        Index("idx_dd_device_ts", "device_id", "timestamp", postgresql_using="btree"),
+        Index("idx_dd_device_ra", "device_id", "received_at", postgresql_using="btree"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    device_id = Column(String(20), nullable=False, index=True)
+    company_id = Column(String(20))
+    location_id = Column(String(20))
+    timestamp = Column(String(50))
+    type = Column(String(50))
+    subtype = Column(String(50))
+    data_json = Column(Text)
+    received_at = Column(DateTime, server_default=func.now())
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(100), unique=True, nullable=False, index=True)
+    password_hash = Column(String(200), nullable=False)
+    name = Column(String(200), nullable=False)
+    role = Column(String(50), nullable=False)  # admin, company_manager, location_manager, user
+    company_id = Column(Integer)
+    location_id = Column(Integer)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
