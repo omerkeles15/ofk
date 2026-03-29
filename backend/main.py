@@ -1,13 +1,46 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
-import json, os, sqlite3
+import json, os, sqlite3, asyncio
 from datetime import datetime
 
 app = FastAPI(title="OFK SCADA Backend")
+
+# ── WebSocket Bağlantı Yöneticisi ────────────────────────────
+class ConnectionManager:
+    def __init__(self):
+        # { device_id: set(WebSocket) }
+        self._subs: dict[str, set[WebSocket]] = {}
+
+    async def subscribe(self, ws: WebSocket, device_id: str):
+        await ws.accept()
+        if device_id not in self._subs:
+            self._subs[device_id] = set()
+        self._subs[device_id].add(ws)
+
+    def unsubscribe(self, ws: WebSocket, device_id: str):
+        subs = self._subs.get(device_id)
+        if subs:
+            subs.discard(ws)
+            if not subs:
+                del self._subs[device_id]
+
+    async def broadcast(self, device_id: str, data: dict):
+        subs = self._subs.get(device_id, set()).copy()
+        dead = []
+        msg = json.dumps(data, ensure_ascii=False)
+        for ws in subs:
+            try:
+                await ws.send_text(msg)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.unsubscribe(ws, device_id)
+
+ws_manager = ConnectionManager()
 
 DIST_DIR = os.path.join(os.path.dirname(__file__), "..", "dist")
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
@@ -349,11 +382,11 @@ def peek_next_device_id():
 # ══════════════════════════════════════════════════════════════
 
 @app.post("/api/device-data")
-def receive_device_data(payload: DeviceDataPayload):
-    """IoT cihazdan gelen veriyi SQLite'a yazar."""
+async def receive_device_data(payload: DeviceDataPayload):
+    """IoT cihazdan gelen veriyi SQLite'a yazar ve WebSocket ile anında push yapar."""
     now = datetime.now().isoformat()
     conn = get_db()
-    conn.execute(
+    cur = conn.execute(
         """INSERT INTO device_data
            (device_id, company_id, location_id, timestamp, type, subtype, data_json, received_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -368,8 +401,26 @@ def receive_device_data(payload: DeviceDataPayload):
             now,
         ),
     )
+    row_id = cur.lastrowid
     conn.commit()
     conn.close()
+
+    # WebSocket ile anında push
+    await ws_manager.broadcast(payload.deviceId, {
+        "type": "new_data",
+        "record": {
+            "id": row_id,
+            "deviceId": payload.deviceId,
+            "companyId": payload.companyId,
+            "locationId": payload.locationId,
+            "timestamp": payload.timestamp,
+            "type": payload.type,
+            "subtype": payload.subtype,
+            "data": payload.data,
+            "receivedAt": now,
+        },
+    })
+
     return {"ok": True, "receivedAt": now}
 
 
@@ -541,6 +592,19 @@ if not os.path.isdir(LOGO_DIR):
     LOGO_DIR = os.path.join(os.path.dirname(__file__), "..", "public", "logo")
 if os.path.isdir(LOGO_DIR):
     app.mount("/logo", StaticFiles(directory=LOGO_DIR), name="logo")
+
+# ── WebSocket — Canlı Veri İzleme ────────────────────────────
+@app.websocket("/ws/device/{device_id}")
+async def ws_device_live(websocket: WebSocket, device_id: str):
+    await ws_manager.subscribe(websocket, device_id)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        ws_manager.unsubscribe(websocket, device_id)
+
 
 @app.get("/{full_path:path}")
 def serve_spa(full_path: str):

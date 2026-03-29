@@ -37,7 +37,11 @@ function SensorView({ device, deviceId, isAdmin }) {
   const [deleteMode, setDeleteMode] = useState('all')
   const [password, setPassword] = useState('')
   const [pwError, setPwError] = useState('')
+  const [wsConnected, setWsConnected] = useState(false)
+  const wsRef = useRef(null)
+  const retryRef = useRef(null)
 
+  // HTTP ile veri çek (ilk yükleme + filtre değişikliği)
   const loadData = useCallback(async () => {
     try {
       const opts = { limit: pageSize }
@@ -54,13 +58,59 @@ function SensorView({ device, deviceId, isAdmin }) {
     }
   }, [deviceId, pageSize, filterFrom, filterTo])
 
+  // İlk yükleme
+  useEffect(() => { loadData() }, [loadData])
+
+  // WebSocket bağlantısı — canlı veri anında gelir
   useEffect(() => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const url = `${protocol}//${window.location.host}/ws/device/${deviceId}`
     let active = true
-    const poll = () => { if (active) loadData() }
-    poll()
-    const interval = setInterval(poll, POLL_INTERVAL)
-    return () => { active = false; clearInterval(interval) }
-  }, [loadData])
+
+    function connect() {
+      if (!active) return
+      const ws = new WebSocket(url)
+      wsRef.current = ws
+
+      ws.onopen = () => setWsConnected(true)
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+          if (msg.type === 'new_data' && msg.record) {
+            const r = msg.record
+            // Filtre aktifse ve kayıt filtre dışındaysa tabloya ekleme
+            const ts = r.timestamp || r.receivedAt || ''
+            if (filterFrom && ts < filterFrom) return
+            if (filterTo && ts > filterTo) return
+
+            setRecords((prev) => [r, ...prev].slice(0, pageSize))
+            setTotal((prev) => prev + 1)
+            setFiltered((prev) => prev + 1)
+            setLatest(r)
+          }
+        } catch { /* ignore */ }
+      }
+
+      ws.onclose = () => {
+        setWsConnected(false)
+        if (active) retryRef.current = setTimeout(connect, 3000)
+      }
+
+      ws.onerror = () => ws.close()
+    }
+
+    connect()
+
+    return () => {
+      active = false
+      if (retryRef.current) clearTimeout(retryRef.current)
+      if (wsRef.current) {
+        wsRef.current.onclose = null
+        wsRef.current.close()
+      }
+    }
+  }, [deviceId, filterFrom, filterTo, pageSize])
 
   const handleDelete = async (e) => {
     e.preventDefault()
@@ -101,8 +151,10 @@ function SensorView({ device, deviceId, isAdmin }) {
         ))}
       </div>
       <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-xl">
-        <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-        <span className="text-xs text-blue-600 font-medium">Canlı veri — {POLL_INTERVAL / 1000} saniyede bir güncelleniyor</span>
+        <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-orange-400'} animate-pulse`} />
+        <span className="text-xs text-blue-600 font-medium">
+          {wsConnected ? 'Canlı bağlantı aktif — veri anında yansır' : 'Bağlanıyor...'}
+        </span>
       </div>
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
         <div className="flex flex-wrap items-end gap-3">
