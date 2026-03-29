@@ -50,6 +50,21 @@ app.include_router(device_data_routes.router)
 app.include_router(user_routes.router)
 
 
+# ── WebSocket — prefix'siz, doğrudan app'e bağlı ─────────────
+from fastapi import WebSocket, WebSocketDisconnect
+
+@app.websocket("/ws/device/{device_id}")
+async def ws_device_live(websocket: WebSocket, device_id: str):
+    await manager.subscribe(websocket, device_id)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        manager.unsubscribe(websocket, device_id)
+
+
 @app.get("/api/health")
 async def health():
     from datetime import datetime

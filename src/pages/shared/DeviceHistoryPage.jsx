@@ -64,54 +64,68 @@ function SensorView({ device, deviceId, isAdmin }) {
     }
   }, [deviceId, pageSize, filterFrom, filterTo])
 
+  const loadDataRef = useRef(loadData)
+  useEffect(() => { loadDataRef.current = loadData }, [loadData])
+
+  // İlk yükleme + filtre değişikliğinde yeniden çek
   // İlk yükleme + filtre değişikliğinde yeniden çek
   useEffect(() => { loadData() }, [loadData])
 
-  // WebSocket bağlantısı — sadece deviceId değiştiğinde yeniden bağlan
+  // WebSocket bağlantısı — canlı veri anında gelir
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${protocol}//${window.location.host}/ws/device/${deviceId}`
     let active = true
+    let wsOk = false
 
     function connect() {
       if (!active) return
-      const ws = new WebSocket(url)
-      wsRef.current = ws
+      try {
+        const ws = new WebSocket(url)
+        wsRef.current = ws
 
-      ws.onopen = () => setWsConnected(true)
+        ws.onopen = () => { wsOk = true; setWsConnected(true) }
 
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data)
-          if (msg.type === 'new_data' && msg.record) {
-            const r = msg.record
-            const ts = r.timestamp || r.receivedAt || ''
-            const f = filterRef.current
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data)
+            if (msg.type === 'new_data' && msg.record) {
+              const r = msg.record
+              const ts = r.timestamp || r.receivedAt || ''
+              const f = filterRef.current
+              if (f.from && ts < f.from) return
+              if (f.to && ts > f.to) return
+              setRecords((prev) => [r, ...prev].slice(0, pageSizeRef.current))
+              setTotal((prev) => prev + 1)
+              setFiltered((prev) => prev + 1)
+              setLatest(r)
+            }
+          } catch { /* ignore */ }
+        }
 
-            // Filtre aktifse ve kayıt filtre dışındaysa tabloya ekleme
-            if (f.from && ts < f.from) return
-            if (f.to && ts > f.to) return
+        ws.onclose = () => {
+          wsOk = false
+          setWsConnected(false)
+          if (active) retryRef.current = setTimeout(connect, 3000)
+        }
 
-            setRecords((prev) => [r, ...prev].slice(0, pageSizeRef.current))
-            setTotal((prev) => prev + 1)
-            setFiltered((prev) => prev + 1)
-            setLatest(r)
-          }
-        } catch { /* ignore */ }
-      }
-
-      ws.onclose = () => {
+        ws.onerror = () => { wsOk = false; ws.close() }
+      } catch {
+        wsOk = false
         setWsConnected(false)
-        if (active) retryRef.current = setTimeout(connect, 3000)
       }
-
-      ws.onerror = () => ws.close()
     }
 
     connect()
 
+    // Polling fallback — WebSocket çalışmazsa 2 saniyede bir veri çek
+    const pollInterval = setInterval(() => {
+      if (!wsOk && active) loadDataRef.current()
+    }, 2000)
+
     return () => {
       active = false
+      clearInterval(pollInterval)
       if (retryRef.current) clearTimeout(retryRef.current)
       if (wsRef.current) {
         wsRef.current.onclose = null
@@ -159,9 +173,9 @@ function SensorView({ device, deviceId, isAdmin }) {
         ))}
       </div>
       <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-xl">
-        <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-orange-400'} animate-pulse`} />
+        <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-blue-500'} animate-pulse`} />
         <span className="text-xs text-blue-600 font-medium">
-          {wsConnected ? 'Canlı bağlantı aktif — veri anında yansır' : 'Bağlanıyor...'}
+          {wsConnected ? 'Canlı bağlantı aktif — veri anında yansır' : 'Otomatik güncelleme aktif — 2 saniyede bir'}
         </span>
       </div>
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">

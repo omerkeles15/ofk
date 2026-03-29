@@ -162,13 +162,4 @@ async def get_device_stats(device_id: str, db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.websocket("/ws/device/{device_id}")
-async def ws_device_live(websocket: WebSocket, device_id: str):
-    await manager.subscribe(websocket, device_id)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        pass
-    finally:
-        manager.unsubscribe(websocket, device_id)
+# WebSocket endpoint kaldırıldı — app/main.py'de tanımlı
