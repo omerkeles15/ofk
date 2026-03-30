@@ -218,7 +218,7 @@ export default function AdminCompanyDetail() {
                   </button>
                   {/* Cihaz ekle */}
                   <button
-                    onClick={() => { setSelectedLocId(loc.id); setDevForm({ id: '', tagName: '', unit: '' }); setShowDevModal(true) }}
+                    onClick={() => { setSelectedLocId(loc.id); setDevForm({ tagName: '', deviceType: '', subtype: '', unit: '', modbusConfig: null, plcIoConfig: null }); setDevError(''); setShowDevModal(true) }}
                     className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-xl text-sm hover:bg-gray-50 transition-colors"
                   >
                     <Plus size={13} /> Cihaz Ekle
@@ -603,7 +603,8 @@ export default function AdminCompanyDetail() {
                   onChange={(e) => {
                     const unit = getUnit(devForm.deviceType, e.target.value)
                     const modbusConfig = devForm.deviceType === 'plc' ? { ...DEFAULT_MODBUS_CONFIG } : null
-                    setDevForm({ ...devForm, subtype: e.target.value, unit, modbusConfig })
+                    const plcIoConfig = devForm.deviceType === 'plc' ? JSON.parse(JSON.stringify(DEFAULT_PLC_IO_CONFIG)) : null
+                    setDevForm({ ...devForm, subtype: e.target.value, unit, modbusConfig, plcIoConfig })
                   }}
                   required
                 >
