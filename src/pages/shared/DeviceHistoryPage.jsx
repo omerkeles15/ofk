@@ -359,12 +359,13 @@ function PlcViewInner({ deviceId, plcIoConfig, modbusConfig, initialTags, isAdmi
       ? (isBit ? (isOn ? 'bg-green-500' : 'bg-red-500') : 'bg-blue-400')
       : statusColor
 
+    const goToHistory = (e) => {
+      e.stopPropagation()
+      setSelectedPoint({ address: addr, tagName: tagsRef.current[addr] || '', dataType: rowDataType })
+    }
+
     return (
-      <div
-        className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-blue-50 cursor-pointer transition-colors group"
-        onClick={() => setSelectedPoint({ address: addr, tagName: tagsRef.current[addr] || '', dataType: rowDataType })}
-        title="Geçmiş verileri görüntüle"
-      >
+      <div className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 transition-colors group">
         <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotColor}`} />
         <span className={`font-mono text-xs font-semibold w-12 shrink-0 ${color}`}>{addr}</span>
         {isAdmin ? (
@@ -384,7 +385,11 @@ function PlcViewInner({ deviceId, plcIoConfig, modbusConfig, initialTags, isAdmi
             )}
           </span>
         )}
-        <span className="text-gray-300 group-hover:text-blue-400 shrink-0 text-xs ml-auto">▶</span>
+        <button
+          onClick={goToHistory}
+          className="text-gray-300 hover:text-blue-500 shrink-0 text-xs ml-auto p-1 rounded hover:bg-blue-50"
+          title="Geçmiş verileri görüntüle"
+        >▶</button>
       </div>
     )
   }
@@ -473,9 +478,7 @@ function PlcViewInner({ deviceId, plcIoConfig, modbusConfig, initialTags, isAdmi
               const currentVal = ioCurrentValues?.[addr]
               return (
                 <div key={`${addr}-${renderKey}`}
-                  className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-blue-50 cursor-pointer transition-colors group"
-                  onClick={() => setSelectedPoint({ address: addr, tagName: tagsRef.current[addr] || '', dataType: ai.dataType })}
-                  title="Geçmiş verileri görüntüle"
+                  className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 transition-colors group"
                 >
                   <span className="font-mono text-xs font-semibold text-orange-600 w-12 shrink-0">{addr}</span>
                   <span className="text-xs text-gray-400 w-24 shrink-0">{typeLabel}</span>
@@ -487,7 +490,11 @@ function PlcViewInner({ deviceId, plcIoConfig, modbusConfig, initialTags, isAdmi
                   {currentVal != null && (
                     <span className="text-xs font-mono text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded shrink-0">{currentVal}</span>
                   )}
-                  <span className="text-gray-300 group-hover:text-blue-400 shrink-0 text-xs ml-auto">▶</span>
+                  <button
+                    onClick={() => setSelectedPoint({ address: addr, tagName: tagsRef.current[addr] || '', dataType: ai.dataType })}
+                    className="text-gray-300 hover:text-blue-500 shrink-0 text-xs ml-auto p-1 rounded hover:bg-blue-50"
+                    title="Geçmiş verileri görüntüle"
+                  >▶</button>
                 </div>
               )
             })}
@@ -512,9 +519,7 @@ function PlcViewInner({ deviceId, plcIoConfig, modbusConfig, initialTags, isAdmi
               const currentVal = ioCurrentValues?.[addr]
               return (
                 <div key={`${addr}-${renderKey}`}
-                  className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-blue-50 cursor-pointer transition-colors group"
-                  onClick={() => setSelectedPoint({ address: addr, tagName: tagsRef.current[addr] || '', dataType: ao.dataType })}
-                  title="Geçmiş verileri görüntüle"
+                  className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 transition-colors group"
                 >
                   <span className="font-mono text-xs font-semibold text-purple-600 w-12 shrink-0">{addr}</span>
                   <span className="text-xs text-gray-400 w-24 shrink-0">{typeLabel}</span>
@@ -526,7 +531,11 @@ function PlcViewInner({ deviceId, plcIoConfig, modbusConfig, initialTags, isAdmi
                   {currentVal != null && (
                     <span className="text-xs font-mono text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded shrink-0">{currentVal}</span>
                   )}
-                  <span className="text-gray-300 group-hover:text-blue-400 shrink-0 text-xs ml-auto">▶</span>
+                  <button
+                    onClick={() => setSelectedPoint({ address: addr, tagName: tagsRef.current[addr] || '', dataType: ao.dataType })}
+                    className="text-gray-300 hover:text-blue-500 shrink-0 text-xs ml-auto p-1 rounded hover:bg-blue-50"
+                    title="Geçmiş verileri görüntüle"
+                  >▶</button>
                 </div>
               )
             })}
@@ -550,9 +559,7 @@ function PlcViewInner({ deviceId, plcIoConfig, modbusConfig, initialTags, isAdmi
             const currentVal = ioCurrentValues?.[addr]
             return (
               <div key={`${addr}-${renderKey}`}
-                className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-blue-50 cursor-pointer transition-colors group"
-                onClick={() => setSelectedPoint({ address: addr, tagName: tagsRef.current[addr] || '', dataType: cfg.dataRegister?.dataType ?? 'word' })}
-                title="Geçmiş verileri görüntüle"
+                className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 transition-colors group"
               >
                 <span className="font-mono text-xs font-semibold text-gray-600 w-12 shrink-0">{addr}</span>
                 {isAdmin ? (
@@ -563,7 +570,11 @@ function PlcViewInner({ deviceId, plcIoConfig, modbusConfig, initialTags, isAdmi
                 {currentVal != null && (
                   <span className="text-xs font-mono text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded shrink-0">{currentVal}</span>
                 )}
-                <span className="text-gray-300 group-hover:text-blue-400 shrink-0 text-xs ml-auto">▶</span>
+                <button
+                  onClick={() => setSelectedPoint({ address: addr, tagName: tagsRef.current[addr] || '', dataType: cfg.dataRegister?.dataType ?? 'word' })}
+                  className="text-gray-300 hover:text-blue-500 shrink-0 text-xs ml-auto p-1 rounded hover:bg-blue-50"
+                  title="Geçmiş verileri görüntüle"
+                >▶</button>
               </div>
             )
           })}
