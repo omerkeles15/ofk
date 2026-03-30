@@ -5,6 +5,7 @@ import AppLayout from '../../components/Layout/AppLayout'
 import Modal from '../../components/Modal'
 import Table from '../../components/Table'
 import FormField from '../../components/FormField'
+import ConfirmDialog from '../../components/ConfirmDialog'
 import { useFormValidation } from '../../hooks/useFormValidation'
 import { useCompanyStore } from '../../features/company/companyStore'
 import { DEVICE_TYPE_OPTIONS, getSubtypes, getUnit, DEFAULT_MODBUS_CONFIG, MODBUS_OPTIONS, DEFAULT_PLC_IO_CONFIG, DATA_TYPES } from '../../features/device/deviceCatalog'
@@ -42,6 +43,7 @@ export default function AdminCompanyDetail() {
   const [locForm, setLocForm] = useState({ name: '' })
   const [devForm, setDevForm] = useState({ tagName: '', deviceType: '', subtype: '', unit: '', modbusConfig: null, plcIoConfig: null })
   const [devError, setDevError] = useState('')
+  const [toggleTarget, setToggleTarget] = useState(null) // { device, locId } — onay bekleyen toggle
 
   const locValidationRules = useMemo(() => ({
     name: (v) => (!v || !v.trim()) ? 'Lokasyon adı boş bırakılamaz' : null,
@@ -112,7 +114,15 @@ export default function AdminCompanyDetail() {
         <div className="flex items-center gap-2">
           <Switch
             checked={r.status === 'online'}
-            onChange={() => toggleDeviceStatus(company.id, r._locId, r.id)}
+            onChange={() => {
+              if (r.status === 'online') {
+                // Aktiften pasife — onay iste
+                setToggleTarget({ device: r, locId: r._locId })
+              } else {
+                // Pasiften aktife — direkt geç
+                toggleDeviceStatus(company.id, r._locId, r.id)
+              }
+            }}
           />
           <span className={`text-xs font-medium ${r.status === 'online' ? 'text-green-600' : 'text-gray-400'}`}>
             {r.status === 'online' ? 'Aktif' : 'Pasif'}
@@ -825,6 +835,19 @@ export default function AdminCompanyDetail() {
             </div>
           </form>
         </Modal>
+      )}
+
+      {/* Cihaz Pasife Alma Onay Dialogu */}
+      {toggleTarget && (
+        <ConfirmDialog
+          title="Cihazı Pasife Al"
+          message={`"${toggleTarget.device.tagName}" (${toggleTarget.device.id}) cihazını pasife almak istediğinize emin misiniz? Pasif durumdayken bu cihaza veri gönderilemez.`}
+          onConfirm={() => {
+            toggleDeviceStatus(company.id, toggleTarget.locId, toggleTarget.device.id)
+            setToggleTarget(null)
+          }}
+          onCancel={() => setToggleTarget(null)}
+        />
       )}
     </AppLayout>
   )

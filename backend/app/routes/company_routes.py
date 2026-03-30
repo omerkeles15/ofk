@@ -275,3 +275,15 @@ async def delete_device(cid: int, lid: int, device_id: str, db: AsyncSession = D
     await db.commit()
     await cache_delete("companies:*")
     return {"ok": True}
+
+
+@router.post("/companies/{cid}/locations/{lid}/devices/{device_id}/toggle")
+async def toggle_device(cid: int, lid: int, device_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Device).where(Device.id == device_id))
+    dev = result.scalar_one_or_none()
+    if not dev:
+        raise HTTPException(404, "Cihaz bulunamadı")
+    dev.status = "offline" if dev.status == "online" else "online"
+    await db.commit()
+    await cache_delete("companies:*")
+    return {"id": dev.id, "status": dev.status}
