@@ -10,13 +10,21 @@ export const useAuthStore = create(
       isAuthenticated: false,
 
       login: async (username, password) => {
+        // Eski cache'leri temizle
+        localStorage.removeItem('scada-user-storage')
+        localStorage.removeItem('scada-company-storage')
+
         const res = await axios.post('/api/auth/login', { username, password })
         const { user, token, redirect } = res.data
         set({ user, token, isAuthenticated: true })
         return redirect
       },
 
-      logout: () => set({ user: null, token: null, isAuthenticated: false }),
+      logout: () => {
+        localStorage.removeItem('scada-user-storage')
+        localStorage.removeItem('scada-company-storage')
+        set({ user: null, token: null, isAuthenticated: false })
+      },
     }),
     { name: 'auth-storage' }
   )

@@ -15,9 +15,6 @@ export default function LoginPage() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    // Eski cache'leri temizle
-    localStorage.removeItem('scada-user-storage')
-    localStorage.removeItem('scada-company-storage')
     try {
       const redirect = await login(form.username, form.password)
       navigate(redirect)
