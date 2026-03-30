@@ -14,6 +14,70 @@ from app.cache import cache_get, cache_set, cache_delete, buffer_push
 router = APIRouter(prefix="/api", tags=["device-data"])
 
 
+def _expand_compact_plc(compact_data, plc_io_config):
+    """Kompakt PLC verisini genişletilmiş formata çevirir."""
+    io = plc_io_config or {}
+    expanded = {}
+
+    di_str = compact_data.get("DI", "0")
+    di_count = (io.get("digitalInputs") or {}).get("count", 0)
+    if di_count > 0:
+        di_val = int(di_str)
+        addrs, group = [], 2
+        for i in range(min(8, di_count)):
+            addrs.append(f"X{i}")
+        while len(addrs) < di_count:
+            if group % 10 in (8, 9):
+                group += 1
+                continue
+            for i in range(8):
+                if len(addrs) >= di_count:
+                    break
+                addrs.append(f"X{group * 10 + i}")
+            group += 1
+        expanded["digitalInputs"] = {a: ("1" if (di_val >> i) & 1 else "0") for i, a in enumerate(addrs)}
+
+    do_str = compact_data.get("DO", "0")
+    do_count = (io.get("digitalOutputs") or {}).get("count", 0)
+    if do_count > 0:
+        do_val = int(do_str)
+        addrs, group = [], 2
+        for i in range(min(6, do_count)):
+            addrs.append(f"Y{i}")
+        while len(addrs) < do_count:
+            if group % 10 in (8, 9):
+                group += 1
+                continue
+            for i in range(8):
+                if len(addrs) >= do_count:
+                    break
+                addrs.append(f"Y{group * 10 + i}")
+            group += 1
+        expanded["digitalOutputs"] = {a: ("1" if (do_val >> i) & 1 else "0") for i, a in enumerate(addrs)}
+
+    ai_str = compact_data.get("AI", "")
+    ai_cfg = io.get("analogInputs") or []
+    if ai_str and ai_cfg:
+        vals = ai_str.split(",")
+        expanded["analogInputs"] = {f"AI{c.get('channel',i)}": {"value": vals[i].strip() if i < len(vals) else "0", "dataType": c.get("dataType","word")} for i, c in enumerate(ai_cfg)}
+
+    ao_str = compact_data.get("AO", "")
+    ao_cfg = io.get("analogOutputs") or []
+    if ao_str and ao_cfg:
+        vals = ao_str.split(",")
+        expanded["analogOutputs"] = {f"AO{c.get('channel',i)}": {"value": vals[i].strip() if i < len(vals) else "0", "dataType": c.get("dataType","word")} for i, c in enumerate(ao_cfg)}
+
+    dr_str = compact_data.get("DR", "")
+    dr_cfg = io.get("dataRegister") or {}
+    if dr_str:
+        vals = dr_str.split(",")
+        start = dr_cfg.get("start", 0)
+        dt = dr_cfg.get("dataType", "word")
+        expanded["dataRegisters"] = {f"D{start+i}": {"value": v.strip(), "dataType": dt} for i, v in enumerate(vals)}
+
+    return expanded
+
+
 @router.post("/device-data")
 async def receive_device_data(payload: DeviceDataPayload, db: AsyncSession = Depends(get_db)):
     """
@@ -45,6 +109,11 @@ async def receive_device_data(payload: DeviceDataPayload, db: AsyncSession = Dep
         if device.unit and incoming_unit and incoming_unit != device.unit:
             raise HTTPException(400, f"Birim uyuşmazlığı: Cihaz birimi '{device.unit}' ama gelen '{incoming_unit}'.")
 
+    # ── Kompakt PLC formatı kontrolü ve genişletme ─────────
+    data_to_store = payload.data
+    if device.device_type == "plc" and payload.data and any(k in payload.data for k in ("DI","DO","AI","AO","DR")):
+        data_to_store = _expand_compact_plc(payload.data, device.plc_io_config)
+
     # ── Veriyi kaydet ────────────────────────────────────────
     now = datetime.now().isoformat()
 
@@ -55,7 +124,7 @@ async def receive_device_data(payload: DeviceDataPayload, db: AsyncSession = Dep
         "timestamp": payload.timestamp,
         "type": payload.type,
         "subtype": payload.subtype,
-        "data_json": json.dumps(payload.data, ensure_ascii=False) if payload.data else None,
+        "data_json": json.dumps(data_to_store, ensure_ascii=False) if data_to_store else None,
         "received_at": now,
     }
 
@@ -79,7 +148,7 @@ async def receive_device_data(payload: DeviceDataPayload, db: AsyncSession = Dep
             "timestamp": payload.timestamp,
             "type": payload.type,
             "subtype": payload.subtype,
-            "data": payload.data,
+            "data": data_to_store,
             "receivedAt": now,
         },
     }

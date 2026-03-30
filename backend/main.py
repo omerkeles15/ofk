@@ -381,6 +381,123 @@ def peek_next_device_id():
 # DEVICE DATA — SQLite tabanlı, indeksli, sayfalı, filtreli
 # ══════════════════════════════════════════════════════════════
 
+def _get_delta_x_addresses(count):
+    """Delta DVP X adresleri üret — oktal gruplama kuralı."""
+    addrs = []
+    if count <= 0:
+        return addrs
+    for i in range(8):
+        if len(addrs) >= count:
+            break
+        addrs.append(f"X{i}")
+    group = 2
+    while len(addrs) < count:
+        if group % 10 in (8, 9):
+            group += 1
+            continue
+        base = group * 10
+        for i in range(8):
+            if len(addrs) >= count:
+                break
+            addrs.append(f"X{base + i}")
+        group += 1
+    return addrs
+
+def _get_delta_y_addresses(count):
+    """Delta DVP Y adresleri üret — oktal gruplama kuralı."""
+    addrs = []
+    if count <= 0:
+        return addrs
+    for i in range(6):
+        if len(addrs) >= count:
+            break
+        addrs.append(f"Y{i}")
+    group = 2
+    while len(addrs) < count:
+        if group % 10 in (8, 9):
+            group += 1
+            continue
+        base = group * 10
+        for i in range(8):
+            if len(addrs) >= count:
+                break
+            addrs.append(f"Y{base + i}")
+        group += 1
+    return addrs
+
+def _expand_compact_plc_data(compact_data, device_info):
+    """
+    Kompakt PLC verisini genişletilmiş formata çevirir.
+    Gelen: {"DI":"244","DO":"21","AI":"1024,2048","AO":"512","DR":"100,200,0,..."}
+    Dönen: {"digitalInputs":{...},"digitalOutputs":{...},"analogInputs":{...},...}
+    """
+    io_cfg = device_info.get("plcIoConfig") or {}
+    expanded = {}
+
+    # Dijital Girişler — desimal → binary
+    di_str = compact_data.get("DI", "0")
+    di_count = io_cfg.get("digitalInputs", {}).get("count", 0)
+    if di_count > 0:
+        di_val = int(di_str)
+        x_addrs = _get_delta_x_addresses(di_count)
+        di_map = {}
+        for i, addr in enumerate(x_addrs):
+            di_map[addr] = "1" if (di_val >> i) & 1 else "0"
+        expanded["digitalInputs"] = di_map
+
+    # Dijital Çıkışlar — desimal → binary
+    do_str = compact_data.get("DO", "0")
+    do_count = io_cfg.get("digitalOutputs", {}).get("count", 0)
+    if do_count > 0:
+        do_val = int(do_str)
+        y_addrs = _get_delta_y_addresses(do_count)
+        do_map = {}
+        for i, addr in enumerate(y_addrs):
+            do_map[addr] = "1" if (do_val >> i) & 1 else "0"
+        expanded["digitalOutputs"] = do_map
+
+    # Analog Girişler — virgülle ayrılmış dizi
+    ai_str = compact_data.get("AI", "")
+    ai_cfg = io_cfg.get("analogInputs", [])
+    if ai_str and ai_cfg:
+        ai_vals = ai_str.split(",")
+        ai_map = {}
+        for i, cfg in enumerate(ai_cfg):
+            val = ai_vals[i].strip() if i < len(ai_vals) else "0"
+            ai_map[f"AI{cfg.get('channel', i)}"] = {"value": val, "dataType": cfg.get("dataType", "word")}
+        expanded["analogInputs"] = ai_map
+
+    # Analog Çıkışlar — virgülle ayrılmış dizi
+    ao_str = compact_data.get("AO", "")
+    ao_cfg = io_cfg.get("analogOutputs", [])
+    if ao_str and ao_cfg:
+        ao_vals = ao_str.split(",")
+        ao_map = {}
+        for i, cfg in enumerate(ao_cfg):
+            val = ao_vals[i].strip() if i < len(ao_vals) else "0"
+            ao_map[f"AO{cfg.get('channel', i)}"] = {"value": val, "dataType": cfg.get("dataType", "word")}
+        expanded["analogOutputs"] = ao_map
+
+    # Data Register — virgülle ayrılmış dizi
+    dr_str = compact_data.get("DR", "")
+    dr_cfg = io_cfg.get("dataRegister", {})
+    if dr_str and dr_cfg:
+        dr_vals = dr_str.split(",")
+        dr_start = dr_cfg.get("start", 0)
+        dr_type = dr_cfg.get("dataType", "word")
+        dr_map = {}
+        for i, val in enumerate(dr_vals):
+            dr_map[f"D{dr_start + i}"] = {"value": val.strip(), "dataType": dr_type}
+        expanded["dataRegisters"] = dr_map
+
+    return expanded
+
+def _is_compact_plc_format(data):
+    """Gelen verinin kompakt PLC formatında olup olmadığını kontrol eder."""
+    if not data:
+        return False
+    return any(k in data for k in ("DI", "DO", "AI", "AO", "DR"))
+
 @app.post("/api/device-data")
 async def receive_device_data(payload: DeviceDataPayload):
     """IoT cihazdan gelen veriyi doğrular, SQLite'a yazar ve WebSocket ile push yapar."""
@@ -439,7 +556,12 @@ async def receive_device_data(payload: DeviceDataPayload):
                 detail=f"Birim uyuşmazlığı: Cihaz '{payload.deviceId}' birimi '{expected_unit}' ama gelen veri birimi '{incoming_unit}'."
             )
 
-    # ── 2. Veriyi kaydet ──────────────────────────────────────
+    # ── 2. Kompakt PLC formatı kontrolü ve genişletme ───────
+    data_to_store = payload.data
+    if dev_type == "plc" and payload.data and _is_compact_plc_format(payload.data):
+        data_to_store = _expand_compact_plc_data(payload.data, device_info)
+
+    # ── 3. Veriyi kaydet ──────────────────────────────────────
     now = datetime.now().isoformat()
     conn = get_db()
     cur = conn.execute(
@@ -453,7 +575,7 @@ async def receive_device_data(payload: DeviceDataPayload):
             payload.timestamp,
             payload.type,
             payload.subtype,
-            json.dumps(payload.data, ensure_ascii=False) if payload.data else None,
+            json.dumps(data_to_store, ensure_ascii=False) if data_to_store else None,
             now,
         ),
     )
@@ -472,7 +594,7 @@ async def receive_device_data(payload: DeviceDataPayload):
             "timestamp": payload.timestamp,
             "type": payload.type,
             "subtype": payload.subtype,
-            "data": payload.data,
+            "data": data_to_store,
             "receivedAt": now,
         },
     })

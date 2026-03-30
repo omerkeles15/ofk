@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { HelpCircle, Copy, Check } from 'lucide-react'
 import Modal from './Modal'
-import { generateDeviceJsonTemplate } from '../features/device/generateJsonTemplate'
+import { generateDeviceJsonTemplate, generateCompactFormatDescription } from '../features/device/generateJsonTemplate'
 
 /**
  * Cihaz JSON veri formatı bilgi modalı.
@@ -19,6 +19,7 @@ export default function DeviceJsonInfoModal({ device, company, location, onClose
 
   const jsonTemplate = generateDeviceJsonTemplate(device, company, location)
   const jsonString = JSON.stringify(jsonTemplate, null, 2)
+  const compactDesc = generateCompactFormatDescription(device)
 
   const handleCopy = async () => {
     try {
@@ -56,6 +57,15 @@ export default function DeviceJsonInfoModal({ device, company, location, onClose
         <div className="bg-gray-900 rounded-xl p-4 overflow-x-auto max-h-96 overflow-y-auto">
           <pre className="text-xs text-green-400 font-mono whitespace-pre">{jsonString}</pre>
         </div>
+
+        {compactDesc && compactDesc.length > 0 && (
+          <div className="bg-blue-50 rounded-xl p-3 space-y-1">
+            <p className="text-xs font-semibold text-blue-700">Kompakt Format Açıklaması:</p>
+            {compactDesc.map((line, i) => (
+              <p key={i} className="text-xs text-blue-600">• {line}</p>
+            ))}
+          </div>
+        )}
 
         <div className="flex justify-end gap-3">
           <button
