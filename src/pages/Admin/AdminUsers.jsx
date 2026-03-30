@@ -172,12 +172,12 @@ export default function AdminUsers() {
     setShowModal(true)
   }, [clearErrors])
 
-  const handleAdd = (e) => {
+  const handleAdd = async (e) => {
     e.preventDefault()
     setError('')
     if (!validate(form)) return
     try {
-      addUser({
+      await addUser({
         ...form,
         companyId: form.companyId ? Number(form.companyId) : null,
         locationId: form.locationId ? Number(form.locationId) : null,
@@ -185,7 +185,7 @@ export default function AdminUsers() {
       setForm({ username: '', name: '', password: '', role: 'user', companyId: '', locationId: '' })
       setShowModal(false)
     } catch (err) {
-      setError(err.message)
+      setError(err.response?.data?.detail || err.message)
     }
   }
 

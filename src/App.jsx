@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import ProtectedRoute from './app/ProtectedRoute'
 import { useCompanyStore } from './features/company/companyStore'
+import { useUserStore } from './features/users/userStore'
 
 import LoginPage from './pages/Login/LoginPage'
 import AdminDashboard from './pages/Admin/AdminDashboard'
@@ -20,7 +21,8 @@ import Unauthorized from './pages/Unauthorized'
 
 export default function App() {
   const fetchCompanies = useCompanyStore((s) => s.fetchCompanies)
-  useEffect(() => { fetchCompanies() }, [fetchCompanies])
+  const fetchUsers = useUserStore((s) => s.fetchUsers)
+  useEffect(() => { fetchCompanies(); fetchUsers() }, [fetchCompanies, fetchUsers])
 
   return (
     <Routes>
