@@ -5,9 +5,6 @@ from app.auth import hash_password
 
 DEFAULT_USERS = [
     {"username": "admin", "password": "admin123", "role": "admin", "name": "Sistem Admini"},
-    {"username": "firma1", "password": "firma123", "role": "company_manager", "name": "Ahmet Yılmaz", "company_id": 1},
-    {"username": "lokasyon1", "password": "lok123", "role": "location_manager", "name": "Mehmet Demir", "company_id": 1, "location_id": 1},
-    {"username": "kullanici1", "password": "kul123", "role": "user", "name": "Ayşe Kaya", "company_id": 1, "location_id": 1},
 ]
 
 
