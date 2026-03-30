@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import ProtectedRoute from './app/ProtectedRoute'
+import { useCompanyStore } from './features/company/companyStore'
 
 import LoginPage from './pages/Login/LoginPage'
 import AdminDashboard from './pages/Admin/AdminDashboard'
@@ -17,6 +19,9 @@ import UserDeviceHistory from './pages/User/UserDeviceHistory'
 import Unauthorized from './pages/Unauthorized'
 
 export default function App() {
+  const fetchCompanies = useCompanyStore((s) => s.fetchCompanies)
+  useEffect(() => { fetchCompanies() }, [fetchCompanies])
+
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />

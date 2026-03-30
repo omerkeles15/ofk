@@ -66,8 +66,8 @@ function SensorView({ device, deviceId, isAdmin }) {
 
   const loadDataRef = useRef(loadData)
   useEffect(() => { loadDataRef.current = loadData }, [loadData])
+  const wsConnectedRef = useRef(false)
 
-  // İlk yükleme + filtre değişikliğinde yeniden çek
   // İlk yükleme + filtre değişikliğinde yeniden çek
   useEffect(() => { loadData() }, [loadData])
 
@@ -76,7 +76,6 @@ function SensorView({ device, deviceId, isAdmin }) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${protocol}//${window.location.host}/ws/device/${deviceId}`
     let active = true
-    let wsOk = false
 
     function connect() {
       if (!active) return
@@ -84,7 +83,10 @@ function SensorView({ device, deviceId, isAdmin }) {
         const ws = new WebSocket(url)
         wsRef.current = ws
 
-        ws.onopen = () => { wsOk = true; setWsConnected(true) }
+        ws.onopen = () => {
+          wsConnectedRef.current = true
+          setWsConnected(true)
+        }
 
         ws.onmessage = (event) => {
           try {
@@ -95,7 +97,13 @@ function SensorView({ device, deviceId, isAdmin }) {
               const f = filterRef.current
               if (f.from && ts < f.from) return
               if (f.to && ts > f.to) return
-              setRecords((prev) => [r, ...prev].slice(0, pageSizeRef.current))
+
+              // Deduplicate: aynı timestamp + deviceId varsa ekleme
+              setRecords((prev) => {
+                const exists = prev.some((p) => p.timestamp === r.timestamp && p.deviceId === r.deviceId)
+                if (exists) return prev
+                return [r, ...prev].slice(0, pageSizeRef.current)
+              })
               setTotal((prev) => prev + 1)
               setFiltered((prev) => prev + 1)
               setLatest(r)
@@ -104,23 +112,23 @@ function SensorView({ device, deviceId, isAdmin }) {
         }
 
         ws.onclose = () => {
-          wsOk = false
+          wsConnectedRef.current = false
           setWsConnected(false)
           if (active) retryRef.current = setTimeout(connect, 3000)
         }
 
-        ws.onerror = () => { wsOk = false; ws.close() }
+        ws.onerror = () => ws.close()
       } catch {
-        wsOk = false
+        wsConnectedRef.current = false
         setWsConnected(false)
       }
     }
 
     connect()
 
-    // Polling fallback — WebSocket çalışmazsa 2 saniyede bir veri çek
+    // Polling fallback — sadece WebSocket bağlı DEĞİLSE çalışır
     const pollInterval = setInterval(() => {
-      if (!wsOk && active) loadDataRef.current()
+      if (!wsConnectedRef.current && active) loadDataRef.current()
     }, 2000)
 
     return () => {
@@ -586,7 +594,7 @@ export default function DeviceHistoryPage({ menuItems }) {
   const { deviceId } = useParams()
   const navigate = useNavigate()
   const { role } = useAuth()
-  const { companies, deviceHistory, clearHistory, deleteHistoryRange, updateDevice, ioHistory } = useCompanyStore()
+  const { companies, updateDevice, ioHistory, fetchCompanies } = useCompanyStore()
   const isAdmin = role === 'admin'
 
   const device = useMemo(() => {
@@ -599,7 +607,6 @@ export default function DeviceHistoryPage({ menuItems }) {
     return null
   }, [companies, deviceId])
 
-  const history = deviceHistory[deviceId] ?? []
   const isPLC = device?.deviceType === 'plc'
 
   // PLC I/O noktalarının mevcut (en son) değerlerini hesapla

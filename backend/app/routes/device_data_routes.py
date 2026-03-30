@@ -85,6 +85,9 @@ async def receive_device_data(payload: DeviceDataPayload, db: AsyncSession = Dep
     }
     await manager.publish_and_broadcast(payload.deviceId, ws_data)
 
+    # Companies cache'ini temizle — son değer güncellensin
+    await cache_delete("companies:*")
+
     return {"ok": True, "receivedAt": now}
 
 

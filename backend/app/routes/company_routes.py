@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+import json
 from app.database import get_db
 from app.models import Company, Location, Device
 from app.schemas import CompanyCreate, CompanyUpdate, LocationCreate, LocationUpdate
@@ -54,13 +55,63 @@ async def get_companies(db: AsyncSession = Depends(get_db)):
     if cached:
         return cached
 
+    from app.models import DeviceData
+
     result = await db.execute(
         select(Company)
         .options(selectinload(Company.locations).selectinload(Location.devices))
         .order_by(Company.id)
     )
     companies = result.scalars().all()
-    data = [_company_to_dict(c) for c in companies]
+
+    # Tüm cihaz ID'lerini topla
+    all_device_ids = []
+    for c in companies:
+        for l in (c.locations or []):
+            for d in (l.devices or []):
+                all_device_ids.append(d.id)
+
+    # Her cihazın son verisini çek
+    latest_map = {}
+    for did in all_device_ids:
+        latest_q = await db.execute(
+            select(DeviceData)
+            .where(DeviceData.device_id == did)
+            .order_by(DeviceData.timestamp.desc())
+            .limit(1)
+        )
+        row = latest_q.scalar_one_or_none()
+        if row and row.data_json:
+            latest_map[did] = json.loads(row.data_json)
+
+    def _dev_dict_with_latest(d):
+        dd = _device_to_dict(d)
+        latest = latest_map.get(d.id)
+        if latest:
+            dd["value"] = float(latest.get("value", 0)) if latest.get("value") else dd.get("value", 0)
+            dd["lastValue"] = latest.get("value")
+            dd["lastUnit"] = latest.get("unit")
+        return dd
+
+    def _loc_dict_with_latest(l):
+        return {
+            "id": l.id,
+            "name": l.name,
+            "managers": l.managers or [],
+            "users": l.users or [],
+            "devices": [_dev_dict_with_latest(d) for d in (l.devices or [])],
+        }
+
+    data = []
+    for c in companies:
+        data.append({
+            "id": c.id,
+            "displayName": c.display_name,
+            "fullName": c.full_name,
+            "managers": c.managers or [],
+            "locations": [_loc_dict_with_latest(l) for l in (c.locations or [])],
+        })
+
     await cache_set("companies:all", data, ttl=10)
     return data
 
@@ -150,17 +201,43 @@ async def delete_location(company_id: int, location_id: int, db: AsyncSession = 
 # ── DEVICES ───────────────────────────────────────────────────
 @router.get("/devices")
 async def get_all_devices(db: AsyncSession = Depends(get_db)):
+    from app.models import DeviceData
     result = await db.execute(
         select(Device, Location, Company)
         .join(Location, Device.location_id == Location.id)
         .join(Company, Location.company_id == Company.id)
     )
     rows = result.all()
-    return [{
-        **_device_to_dict(d),
-        "companyId": c.id, "companyName": c.display_name,
-        "locationId": l.id, "locationName": l.name,
-    } for d, l, c in rows]
+
+    # Her cihazın son verisini çek
+    device_ids = [d.id for d, l, c in rows]
+    latest_map = {}
+    if device_ids:
+        from sqlalchemy import text
+        for did in device_ids:
+            latest_q = await db.execute(
+                select(DeviceData)
+                .where(DeviceData.device_id == did)
+                .order_by(DeviceData.timestamp.desc())
+                .limit(1)
+            )
+            latest_row = latest_q.scalar_one_or_none()
+            if latest_row and latest_row.data_json:
+                latest_map[did] = json.loads(latest_row.data_json)
+
+    devices = []
+    for d, l, c in rows:
+        dev = {
+            **_device_to_dict(d),
+            "companyId": c.id, "companyName": c.display_name,
+            "locationId": l.id, "locationName": l.name,
+        }
+        latest = latest_map.get(d.id)
+        if latest:
+            dev["lastValue"] = latest.get("value")
+            dev["lastUnit"] = latest.get("unit")
+        devices.append(dev)
+    return devices
 
 
 @router.get("/devices/next-id")
