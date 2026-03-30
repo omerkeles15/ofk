@@ -28,7 +28,7 @@ async def get_users(db: AsyncSession = Depends(get_db)):
 
 @router.post("/users")
 async def add_user(body: UserCreate, db: AsyncSession = Depends(get_db)):
-    exists = await db.execute(select(User).where(User.username == body.username))
+    exists = await db.execute(select(User).where(User.username == body.username, User.is_active == True))
     if exists.scalar_one_or_none():
         raise HTTPException(400, f'"{body.username}" kullanıcı adı zaten alınmış')
     user = User(
@@ -69,6 +69,6 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(404, "Kullanıcı bulunamadı")
-    user.is_active = False
+    await db.delete(user)
     await db.commit()
     return {"ok": True}
