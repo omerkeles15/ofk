@@ -1,5 +1,1 @@
-[
-  { "id": 2, "username": "firma1", "name": "Ahmet Yılmaz", "role": "company_manager", "companyId": 1, "locationId": null },
-  { "id": 3, "username": "lokasyon1", "name": "Mehmet Demir", "role": "location_manager", "companyId": 1, "locationId": 1 },
-  { "id": 4, "username": "kullanici1", "name": "Ayşe Kaya", "role": "user", "companyId": 1, "locationId": 1 }
-]
+[]
