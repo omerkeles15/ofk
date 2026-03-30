@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
 from typing import Optional
@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 
 from app.database import get_db
-from app.models import DeviceData
+from app.models import DeviceData, Device
 from app.schemas import DeviceDataPayload
 from app.ws_manager import manager
 from app.cache import cache_get, cache_set, cache_delete, buffer_push
@@ -15,14 +15,37 @@ router = APIRouter(prefix="/api", tags=["device-data"])
 
 
 @router.post("/device-data")
-async def receive_device_data(payload: DeviceDataPayload):
+async def receive_device_data(payload: DeviceDataPayload, db: AsyncSession = Depends(get_db)):
     """
-    IoT cihazdan gelen veri akışı:
-    1. Redis buffer'a yaz (mikrosaniye)
-    2. Redis Pub/Sub ile tüm worker'lara bildir
-    3. WebSocket ile izleyen kullanıcılara anında push
-    4. Arka planda batch worker buffer'ı PostgreSQL'e yazar
+    IoT cihazdan gelen veri akışı — doğrulama + kayıt + push.
+    Kontroller:
+    1. Cihaz sistemde kayıtlı mı?
+    2. Cihaz aktif mi?
+    3. Gelen veri tipi cihaz tipiyle uyuşuyor mu?
     """
+
+    # ── Cihaz doğrulama ──────────────────────────────────────
+    result = await db.execute(select(Device).where(Device.id == payload.deviceId))
+    device = result.scalar_one_or_none()
+
+    if not device:
+        raise HTTPException(404, f"Cihaz '{payload.deviceId}' sistemde kayıtlı değil.")
+
+    if device.status != "online":
+        raise HTTPException(403, f"Cihaz '{payload.deviceId}' pasif durumda. Veri kabul edilmiyor.")
+
+    if payload.type and device.device_type and payload.type != device.device_type:
+        raise HTTPException(400, f"Tip uyuşmazlığı: Cihaz tipi '{device.device_type}' ama gelen '{payload.type}'.")
+
+    if payload.subtype and device.subtype and payload.subtype != device.subtype:
+        raise HTTPException(400, f"Alt tip uyuşmazlığı: Cihaz alt tipi '{device.subtype}' ama gelen '{payload.subtype}'.")
+
+    if device.device_type == "sensor" and payload.data:
+        incoming_unit = payload.data.get("unit", "")
+        if device.unit and incoming_unit and incoming_unit != device.unit:
+            raise HTTPException(400, f"Birim uyuşmazlığı: Cihaz birimi '{device.unit}' ama gelen '{incoming_unit}'.")
+
+    # ── Veriyi kaydet ────────────────────────────────────────
     now = datetime.now().isoformat()
 
     record = {

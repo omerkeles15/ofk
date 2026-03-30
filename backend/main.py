@@ -383,7 +383,63 @@ def peek_next_device_id():
 
 @app.post("/api/device-data")
 async def receive_device_data(payload: DeviceDataPayload):
-    """IoT cihazdan gelen veriyi SQLite'a yazar ve WebSocket ile anında push yapar."""
+    """IoT cihazdan gelen veriyi doğrular, SQLite'a yazar ve WebSocket ile push yapar."""
+
+    # ── 1. Cihaz doğrulama ────────────────────────────────────
+    companies = _load_companies()
+    device_info = None
+    for c in companies:
+        for loc in c.get("locations", []):
+            for d in loc.get("devices", []):
+                if d.get("id") == payload.deviceId:
+                    device_info = d
+                    break
+            if device_info:
+                break
+        if device_info:
+            break
+
+    # Cihaz bulunamadı
+    if not device_info:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Cihaz '{payload.deviceId}' sistemde kayıtlı değil."
+        )
+
+    # Cihaz pasif mi?
+    if device_info.get("status") != "online":
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cihaz '{payload.deviceId}' pasif durumda. Veri kabul edilmiyor. Önce cihazı aktif edin."
+        )
+
+    # Tip uyuşmazlığı kontrolü
+    dev_type = device_info.get("deviceType")
+    dev_subtype = device_info.get("subtype")
+
+    if payload.type and dev_type and payload.type != dev_type:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tip uyuşmazlığı: Cihaz '{payload.deviceId}' tipi '{dev_type}' ama gelen veri tipi '{payload.type}'."
+        )
+
+    if payload.subtype and dev_subtype and payload.subtype != dev_subtype:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Alt tip uyuşmazlığı: Cihaz '{payload.deviceId}' alt tipi '{dev_subtype}' ama gelen veri alt tipi '{payload.subtype}'."
+        )
+
+    # Sensör için birim kontrolü
+    if dev_type == "sensor" and payload.data:
+        expected_unit = device_info.get("unit", "")
+        incoming_unit = payload.data.get("unit", "")
+        if expected_unit and incoming_unit and incoming_unit != expected_unit:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Birim uyuşmazlığı: Cihaz '{payload.deviceId}' birimi '{expected_unit}' ama gelen veri birimi '{incoming_unit}'."
+            )
+
+    # ── 2. Veriyi kaydet ──────────────────────────────────────
     now = datetime.now().isoformat()
     conn = get_db()
     cur = conn.execute(

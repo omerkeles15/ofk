@@ -115,7 +115,7 @@ async def add_location(company_id: int, body: LocationCreate, db: AsyncSession =
     await db.commit()
     await db.refresh(loc)
     await cache_delete("companies:*")
-    return _location_to_dict(loc)
+    return {"id": loc.id, "name": loc.name, "managers": loc.managers or [], "users": loc.users or [], "devices": []}
 
 
 @router.put("/companies/{company_id}/locations/{location_id}")
@@ -183,8 +183,9 @@ async def add_device(cid: int, lid: int, body: DeviceCreateSchema, db: AsyncSess
     dev = Device(id=new_id, location_id=lid, tag_name=body.tagName, device_type=body.deviceType, subtype=body.subtype, unit=body.unit)
     db.add(dev)
     await db.commit()
+    await db.refresh(dev)
     await cache_delete("companies:*")
-    return _device_to_dict(dev)
+    return {"id": dev.id, "tagName": dev.tag_name, "deviceType": dev.device_type, "subtype": dev.subtype, "unit": dev.unit or "", "value": 0, "status": "offline"}
 
 
 @router.delete("/companies/{cid}/locations/{lid}/devices/{device_id}")
