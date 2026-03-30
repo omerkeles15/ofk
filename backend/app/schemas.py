@@ -36,6 +36,8 @@ class DeviceCreateSchema(BaseModel):
     deviceType: Optional[str] = None
     subtype: Optional[str] = None
     unit: Optional[str] = ""
+    modbusConfig: Optional[dict] = None
+    plcIoConfig: Optional[dict] = None
 
 class DeviceUpdateSchema(BaseModel):
     tagName: Optional[str] = None
@@ -44,6 +46,9 @@ class DeviceUpdateSchema(BaseModel):
     status: Optional[str] = None
     deviceType: Optional[str] = None
     subtype: Optional[str] = None
+    modbusConfig: Optional[dict] = None
+    plcIoConfig: Optional[dict] = None
+    ioTags: Optional[dict] = None
 
 class UserCreate(BaseModel):
     username: str

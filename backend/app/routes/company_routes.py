@@ -257,12 +257,16 @@ async def add_device(cid: int, lid: int, body: DeviceCreateSchema, db: AsyncSess
     last = result.scalar_one_or_none()
     num = int(last.split("-")[1]) + 1 if last and last.startswith("DEV-") else 1
     new_id = f"DEV-{num:03d}"
-    dev = Device(id=new_id, location_id=lid, tag_name=body.tagName, device_type=body.deviceType, subtype=body.subtype, unit=body.unit)
+    dev = Device(
+        id=new_id, location_id=lid, tag_name=body.tagName,
+        device_type=body.deviceType, subtype=body.subtype, unit=body.unit,
+        modbus_config=body.modbusConfig, plc_io_config=body.plcIoConfig,
+    )
     db.add(dev)
     await db.commit()
     await db.refresh(dev)
     await cache_delete("companies:*")
-    return {"id": dev.id, "tagName": dev.tag_name, "deviceType": dev.device_type, "subtype": dev.subtype, "unit": dev.unit or "", "value": 0, "status": "offline"}
+    return _device_to_dict(dev)
 
 
 @router.delete("/companies/{cid}/locations/{lid}/devices/{device_id}")
