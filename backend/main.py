@@ -82,6 +82,17 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_dd_device    ON device_data(device_id);
         CREATE INDEX IF NOT EXISTS idx_dd_device_ts ON device_data(device_id, timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_dd_device_ra ON device_data(device_id, received_at DESC);
+
+        CREATE TABLE IF NOT EXISTS io_point_history (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id   TEXT    NOT NULL,
+            address     TEXT    NOT NULL,
+            value       TEXT    NOT NULL,
+            timestamp   TEXT,
+            received_at TEXT    NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ioph_da ON io_point_history(device_id, address);
+        CREATE INDEX IF NOT EXISTS idx_ioph_dat ON io_point_history(device_id, address, timestamp DESC);
     """)
     conn.close()
 
@@ -581,6 +592,27 @@ async def receive_device_data(payload: DeviceDataPayload):
     )
     row_id = cur.lastrowid
     conn.commit()
+
+    # ── 4. PLC I/O nokta geçmişi kaydet ──────────────────────
+    if dev_type == "plc" and data_to_store:
+        io_conn = get_db()
+        ts = payload.timestamp or now
+        io_records = []
+        for section in ("digitalInputs", "digitalOutputs"):
+            for addr, val in (data_to_store.get(section) or {}).items():
+                io_records.append((payload.deviceId, addr, str(val), ts, now))
+        for section in ("analogInputs", "analogOutputs", "dataRegisters"):
+            for addr, obj in (data_to_store.get(section) or {}).items():
+                val = obj.get("value", "0") if isinstance(obj, dict) else str(obj)
+                io_records.append((payload.deviceId, addr, val, ts, now))
+        if io_records:
+            io_conn.executemany(
+                "INSERT INTO io_point_history (device_id, address, value, timestamp, received_at) VALUES (?,?,?,?,?)",
+                io_records
+            )
+            io_conn.commit()
+        io_conn.close()
+
     conn.close()
 
     # WebSocket ile anında push
@@ -770,6 +802,54 @@ if not os.path.isdir(LOGO_DIR):
     LOGO_DIR = os.path.join(os.path.dirname(__file__), "..", "public", "logo")
 if os.path.isdir(LOGO_DIR):
     app.mount("/logo", StaticFiles(directory=LOGO_DIR), name="logo")
+
+# ── I/O Nokta Geçmişi API ─────────────────────────────────────
+@app.get("/api/io-history/{device_id}/{address}")
+def get_io_point_history(
+    device_id: str,
+    address: str,
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    from_ts: Optional[str] = Query(None, alias="from"),
+    to_ts: Optional[str] = Query(None, alias="to"),
+):
+    conn = get_db()
+    count_sql = "SELECT COUNT(*) FROM io_point_history WHERE device_id = ? AND address = ?"
+    data_sql = "SELECT id, device_id, address, value, timestamp, received_at FROM io_point_history WHERE device_id = ? AND address = ?"
+    params = [device_id, address]
+
+    if from_ts:
+        count_sql += " AND timestamp >= ?"
+        data_sql += " AND timestamp >= ?"
+        params.append(from_ts)
+    if to_ts:
+        count_sql += " AND timestamp <= ?"
+        data_sql += " AND timestamp <= ?"
+        params.append(to_ts)
+
+    filtered = conn.execute(count_sql, params).fetchone()[0]
+    total = conn.execute("SELECT COUNT(*) FROM io_point_history WHERE device_id = ? AND address = ?", (device_id, address)).fetchone()[0]
+
+    data_sql += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+    rows = conn.execute(data_sql, params + [limit, offset]).fetchall()
+    conn.close()
+
+    return {
+        "records": [{"id": r["id"], "value": r["value"], "timestamp": r["timestamp"], "receivedAt": r["received_at"]} for r in rows],
+        "total": total,
+        "filtered": filtered,
+        "limit": limit,
+        "offset": offset,
+    }
+
+@app.delete("/api/io-history/{device_id}/{address}")
+def clear_io_point_history(device_id: str, address: str):
+    conn = get_db()
+    cur = conn.execute("DELETE FROM io_point_history WHERE device_id = ? AND address = ?", (device_id, address))
+    conn.commit()
+    deleted = cur.rowcount
+    conn.close()
+    return {"ok": True, "deleted": deleted}
 
 # ── WebSocket — Canlı Veri İzleme ────────────────────────────
 @app.websocket("/ws/device/{device_id}")

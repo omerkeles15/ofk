@@ -67,6 +67,22 @@ class DeviceData(Base):
     received_at = Column(DateTime, server_default=func.now())
 
 
+class IOPointHistory(Base):
+    """Her I/O noktasının (X0, Y0, AI0, D0 vs.) ayrı geçmiş kaydı."""
+    __tablename__ = "io_point_history"
+    __table_args__ = (
+        Index("idx_ioph_device_addr", "device_id", "address", postgresql_using="btree"),
+        Index("idx_ioph_device_addr_ts", "device_id", "address", "timestamp", postgresql_using="btree"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    device_id = Column(String(20), nullable=False)
+    address = Column(String(20), nullable=False)  # X0, Y0, AI0, AO0, D0
+    value = Column(String(50), nullable=False)
+    timestamp = Column(String(50))
+    received_at = Column(DateTime, server_default=func.now())
+
+
 class User(Base):
     __tablename__ = "users"
 

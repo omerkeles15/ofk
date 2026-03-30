@@ -138,7 +138,22 @@ async def receive_device_data(payload: DeviceDataPayload, db: AsyncSession = Dep
             db.add(DeviceData(**record))
             await db.commit()
 
-    # 2. WebSocket push — anında tüm izleyicilere
+    # 2. PLC I/O nokta geçmişi kaydet
+    if device.device_type == "plc" and data_to_store:
+        from app.models import IOPointHistory
+        from app.database import AsyncSessionLocal
+        ts = payload.timestamp or now
+        async with AsyncSessionLocal() as io_db:
+            for section in ("digitalInputs", "digitalOutputs"):
+                for addr, val in (data_to_store.get(section) or {}).items():
+                    io_db.add(IOPointHistory(device_id=payload.deviceId, address=addr, value=str(val), timestamp=ts))
+            for section in ("analogInputs", "analogOutputs", "dataRegisters"):
+                for addr, obj in (data_to_store.get(section) or {}).items():
+                    val = obj.get("value", "0") if isinstance(obj, dict) else str(obj)
+                    io_db.add(IOPointHistory(device_id=payload.deviceId, address=addr, value=val, timestamp=ts))
+            await io_db.commit()
+
+    # 3. WebSocket push — anında tüm izleyicilere
     ws_data = {
         "type": "new_data",
         "record": {
@@ -255,6 +270,49 @@ async def get_device_stats(device_id: str, db: AsyncSession = Depends(get_db)):
         "firstAt": row.first_at.isoformat() if row.first_at else None,
         "lastAt": row.last_at.isoformat() if row.last_at else None,
     }
+
+
+# ── I/O Nokta Geçmişi ─────────────────────────────────────────
+@router.get("/io-history/{device_id}/{address}")
+async def get_io_point_history(
+    device_id: str,
+    address: str,
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    from_ts: Optional[str] = Query(None, alias="from"),
+    to_ts: Optional[str] = Query(None, alias="to"),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models import IOPointHistory
+    where = [IOPointHistory.device_id == device_id, IOPointHistory.address == address]
+    if from_ts:
+        where.append(IOPointHistory.timestamp >= from_ts)
+    if to_ts:
+        where.append(IOPointHistory.timestamp <= to_ts)
+
+    filtered_total = (await db.execute(select(func.count()).select_from(IOPointHistory).where(*where))).scalar()
+    grand_total = (await db.execute(select(func.count()).select_from(IOPointHistory).where(
+        IOPointHistory.device_id == device_id, IOPointHistory.address == address
+    ))).scalar()
+
+    rows = (await db.execute(
+        select(IOPointHistory).where(*where).order_by(IOPointHistory.timestamp.desc()).limit(limit).offset(offset)
+    )).scalars().all()
+
+    return {
+        "records": [{"id": r.id, "value": r.value, "timestamp": r.timestamp, "receivedAt": r.received_at.isoformat() if r.received_at else None} for r in rows],
+        "total": grand_total,
+        "filtered": filtered_total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+@router.delete("/io-history/{device_id}/{address}")
+async def clear_io_point_history(device_id: str, address: str, db: AsyncSession = Depends(get_db)):
+    from app.models import IOPointHistory
+    result = await db.execute(delete(IOPointHistory).where(IOPointHistory.device_id == device_id, IOPointHistory.address == address))
+    await db.commit()
+    return {"ok": True, "deleted": result.rowcount}
 
 
 # WebSocket endpoint kaldırıldı — app/main.py'de tanımlı

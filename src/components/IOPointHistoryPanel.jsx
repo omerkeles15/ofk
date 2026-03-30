@@ -1,29 +1,13 @@
-import { useState, useMemo } from 'react'
-import { ArrowLeft, Trash2, Filter } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { ArrowLeft, Trash2, Filter, RefreshCw } from 'lucide-react'
 import ConfirmDialog from './ConfirmDialog'
-import { useCompanyStore } from '../features/company/companyStore'
+import axios from 'axios'
 
 const PAGE_SIZE_OPTIONS = [50, 100, 200]
 const ADMIN_PASSWORD = 'admin123'
 
-/**
- * Değeri dataType'a göre parse eder ve gösterim formatına çevirir.
- * Dijital (bit) noktalar: "1" → true (ON), "0" → false (OFF)
- * Analog/register: dataType'a göre parseInt veya parseFloat
- */
-function parseValue(rawValue, dataType) {
-  if (dataType === 'bit') {
-    return rawValue === '1' || rawValue === 'true' || rawValue === true
-  }
-  if (dataType === 'float') return parseFloat(rawValue)
-  return parseInt(rawValue, 10)
-}
-
-/**
- * Dijital değer için ON/OFF badge render eder.
- */
 function DigitalBadge({ value }) {
-  const isOn = value === true || value === '1' || value === 'true'
+  const isOn = value === '1' || value === 'true' || value === true
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold
       ${isOn ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
@@ -33,61 +17,49 @@ function DigitalBadge({ value }) {
   )
 }
 
-/**
- * IOPointHistoryPanel — Seçilen I/O noktasının geçmiş verilerini tablo formatında gösterir.
- *
- * Props:
- * - deviceId: Cihaz ID (ör: "DEV-005")
- * - address: I/O nokta adresi (ör: "X0", "AI0", "D50")
- * - tagName: Tag ismi (ör: "Start Butonu")
- * - dataType: Veri tipi ("bit", "word", "dword", "unsigned", "udword", "float")
- * - isAdmin: Admin yetkisi
- * - onClose: Panel kapatma callback
- */
 export default function IOPointHistoryPanel({ deviceId, address, tagName, dataType, isAdmin, onClose }) {
-  const ioHistory = useCompanyStore((s) => s.ioHistory)
-  const clearIOHistory = useCompanyStore((s) => s.clearIOHistory)
-
-  const key = `${deviceId}:${address}`
-  const records = ioHistory[key] ?? []
-
+  const [records, setRecords] = useState([])
+  const [total, setTotal] = useState(0)
+  const [filtered, setFiltered] = useState(0)
+  const [loading, setLoading] = useState(true)
   const [pageSize, setPageSize] = useState(50)
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const activeRef = useRef(true)
 
   const isBit = dataType === 'bit'
 
-  // Tarih sırasına göre azalan sıralama (en yeni en üstte)
-  const sorted = useMemo(() =>
-    [...records].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)),
-    [records]
-  )
+  const loadData = useCallback(async () => {
+    try {
+      const params = { limit: pageSize }
+      if (filterFrom) params.from = filterFrom
+      if (filterTo) params.to = filterTo
+      const res = await axios.get(`/api/io-history/${deviceId}/${address}`, { params })
+      if (activeRef.current) {
+        setRecords(res.data.records ?? [])
+        setTotal(res.data.total ?? 0)
+        setFiltered(res.data.filtered ?? res.data.total ?? 0)
+        setLoading(false)
+      }
+    } catch {
+      setLoading(false)
+    }
+  }, [deviceId, address, pageSize, filterFrom, filterTo])
 
-  // Tarih filtresi
-  const filtered = useMemo(() => {
-    let data = sorted
-    if (filterFrom) data = data.filter((r) => new Date(r.timestamp) >= new Date(filterFrom))
-    if (filterTo) data = data.filter((r) => new Date(r.timestamp) <= new Date(filterTo))
-    return data
-  }, [sorted, filterFrom, filterTo])
+  useEffect(() => {
+    activeRef.current = true
+    loadData()
+    const interval = setInterval(loadData, 3000)
+    return () => { activeRef.current = false; clearInterval(interval) }
+  }, [loadData])
 
-  // Sayfalama
-  const paginated = filtered.slice(0, pageSize)
-
-  const handleDeleteConfirm = () => {
-    clearIOHistory(deviceId, address)
+  const handleDelete = async () => {
+    await axios.delete(`/api/io-history/${deviceId}/${address}`)
     setShowDeleteConfirm(false)
+    loadData()
   }
 
-  const handlePasswordVerify = (pw) => pw === ADMIN_PASSWORD
-
-  const clearFilters = () => {
-    setFilterFrom('')
-    setFilterTo('')
-  }
-
-  // Adres tipini belirle
   const getAddressType = () => {
     if (address.startsWith('X')) return 'Dijital Giriş'
     if (address.startsWith('Y')) return 'Dijital Çıkış'
@@ -99,7 +71,6 @@ export default function IOPointHistoryPanel({ deviceId, address, tagName, dataTy
 
   return (
     <div className="space-y-4">
-      {/* Başlık */}
       <div className="flex items-center gap-3">
         <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100">
           <ArrowLeft size={18} />
@@ -113,7 +84,6 @@ export default function IOPointHistoryPanel({ deviceId, address, tagName, dataTy
         </div>
       </div>
 
-      {/* Filtre alanı */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -127,7 +97,8 @@ export default function IOPointHistoryPanel({ deviceId, address, tagName, dataTy
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500">Bitiş</label>
             <input type="datetime-local" value={filterTo} onChange={(e) => setFilterTo(e.target.value)}
-              className="px-3 py-1.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+         
+     className="px-3 py-1.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500">Göster</label>
@@ -136,9 +107,13 @@ export default function IOPointHistoryPanel({ deviceId, address, tagName, dataTy
               {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>İlk {n} kayıt</option>)}
             </select>
           </div>
-          <button onClick={clearFilters}
+          <button onClick={() => { setFilterFrom(''); setFilterTo('') }}
             className="px-3 py-1.5 border border-gray-200 rounded-xl text-sm hover:bg-gray-50 mt-auto">Temizle</button>
-          {isAdmin && records.length > 0 && (
+          <button onClick={loadData}
+            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-600 mt-auto" title="Yenile">
+            <RefreshCw size={16} />
+          </button>
+          {isAdmin && total > 0 && (
             <button onClick={() => setShowDeleteConfirm(true)}
               className="ml-auto flex items-center gap-1.5 px-3 py-1.5 border border-red-200 text-red-600 rounded-xl text-sm hover:bg-red-50 mt-auto">
               <Trash2 size={13} /> Tüm Geçmişi Sil
@@ -147,12 +122,11 @@ export default function IOPointHistoryPanel({ deviceId, address, tagName, dataTy
         </div>
       </div>
 
-      {/* Özet istatistikler */}
       <div className="grid grid-cols-3 gap-4">
         {[
-          { label: 'Toplam Kayıt', value: records.length },
-          { label: 'Filtreli Kayıt', value: filtered.length },
-          { label: 'Gösterilen', value: paginated.length },
+          { label: 'Toplam Kayıt', value: total },
+          { label: 'Filtreli', value: filtered },
+          { label: 'Gösterilen', value: records.length },
         ].map(({ label, value }) => (
           <div key={label} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
             <p className="text-xs text-gray-400 mb-1">{label}</p>
@@ -161,7 +135,6 @@ export default function IOPointHistoryPanel({ deviceId, address, tagName, dataTy
         ))}
       </div>
 
-      {/* Geçmiş tablosu */}
       <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm">
         <table className="w-full text-sm">
           <thead>
@@ -173,21 +146,22 @@ export default function IOPointHistoryPanel({ deviceId, address, tagName, dataTy
             </tr>
           </thead>
           <tbody>
-            {paginated.length === 0 ? (
+            {loading ? (
+              <tr><td colSpan={4} className="text-center py-12 text-gray-400">Yükleniyor...</td></tr>
+            ) : records.length === 0 ? (
               <tr><td colSpan={4} className="text-center py-12 text-gray-400">Kayıt bulunamadı</td></tr>
-            ) : paginated.map((r, i) => {
+            ) : records.map((r, i) => {
               const dt = new Date(r.timestamp)
-              const parsed = parseValue(r.value, dataType)
               return (
                 <tr key={r.id ?? i} className="border-b border-gray-50 hover:bg-gray-50">
                   <td className="px-4 py-2.5 text-gray-400 text-xs">{i + 1}</td>
                   <td className="px-4 py-2.5">
                     {isBit ? <DigitalBadge value={r.value} /> : (
-                      <span className="font-semibold text-gray-800">{isNaN(parsed) ? r.value : parsed}</span>
+                      <span className="font-semibold text-gray-800">{r.value}</span>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 text-gray-600">{dt.toLocaleDateString('tr-TR')}</td>
-                  <td className="px-4 py-2.5 text-gray-600 font-mono text-xs">{dt.toLocaleTimeString('tr-TR')}</td>
+                  <td className="px-4 py-2.5 text-gray-600">{isNaN(dt) ? '-' : dt.toLocaleDateString('tr-TR')}</td>
+                  <td className="px-4 py-2.5 text-gray-600 font-mono text-xs">{isNaN(dt) ? '-' : dt.toLocaleTimeString('tr-TR')}</td>
                 </tr>
               )
             })}
@@ -195,14 +169,13 @@ export default function IOPointHistoryPanel({ deviceId, address, tagName, dataTy
         </table>
       </div>
 
-      {/* Silme onay dialogu */}
       {showDeleteConfirm && (
         <ConfirmDialog
           title="Tüm Geçmişi Sil"
-          message={`"${address}${tagName ? ` — ${tagName}` : ''}" noktasına ait tüm geçmiş veriler silinecek. Bu işlem geri alınamaz.`}
+          message={`"${address}${tagName ? ` — ${tagName}` : ''}" noktasına ait tüm geçmiş veriler silinecek.`}
           requirePassword
-          onPasswordVerify={handlePasswordVerify}
-          onConfirm={handleDeleteConfirm}
+          onPasswordVerify={(pw) => pw === ADMIN_PASSWORD}
+          onConfirm={handleDelete}
           onCancel={() => setShowDeleteConfirm(false)}
         />
       )}
