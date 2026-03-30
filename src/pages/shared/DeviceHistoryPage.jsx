@@ -605,7 +605,7 @@ export default function DeviceHistoryPage({ menuItems }) {
   const { deviceId } = useParams()
   const navigate = useNavigate()
   const { role } = useAuth()
-  const { companies, updateDevice, ioHistory, fetchCompanies } = useCompanyStore()
+  const { companies, updateDevice, fetchCompanies } = useCompanyStore()
   const isAdmin = role === 'admin'
 
   const device = useMemo(() => {
@@ -620,21 +620,126 @@ export default function DeviceHistoryPage({ menuItems }) {
 
   const isPLC = device?.deviceType === 'plc'
 
-  // PLC I/O noktalarının mevcut (en son) değerlerini hesapla
-  const ioCurrentValues = useMemo(() => {
-    if (!isPLC) return {}
-    const values = {}
-    for (const [key, records] of Object.entries(ioHistory)) {
-      if (!key.startsWith(`${deviceId}:`)) continue
-      const addr = key.split(':')[1]
-      if (records.length > 0) {
-        // En son kaydın değerini al
-        const sorted = [...records].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-        values[addr] = sorted[0].value
+  // PLC I/O noktalarının mevcut değerlerini backend'den çek + WebSocket ile canlı güncelle
+  const [ioCurrentValues, setIoCurrentValues] = useState({})
+  const ioValuesRef = useRef({})
+
+  // Backend'den son PLC verisini çek
+  useEffect(() => {
+    if (!isPLC || !deviceId) return
+    let active = true
+
+    const fetchLatest = async () => {
+      try {
+        const res = await fetchDeviceData(deviceId, { limit: 1 })
+        if (!active) return
+        const latest = res?.latest?.data
+        if (latest) {
+          const vals = {}
+          // digitalInputs
+          if (latest.digitalInputs) {
+            for (const [addr, v] of Object.entries(latest.digitalInputs)) {
+              vals[addr] = v
+            }
+          }
+          // digitalOutputs
+          if (latest.digitalOutputs) {
+            for (const [addr, v] of Object.entries(latest.digitalOutputs)) {
+              vals[addr] = v
+            }
+          }
+          // analogInputs
+          if (latest.analogInputs) {
+            for (const [addr, obj] of Object.entries(latest.analogInputs)) {
+              vals[addr] = typeof obj === 'object' ? obj.value : obj
+            }
+          }
+          // analogOutputs
+          if (latest.analogOutputs) {
+            for (const [addr, obj] of Object.entries(latest.analogOutputs)) {
+              vals[addr] = typeof obj === 'object' ? obj.value : obj
+            }
+          }
+          // dataRegisters
+          if (latest.dataRegisters) {
+            for (const [addr, obj] of Object.entries(latest.dataRegisters)) {
+              vals[addr] = typeof obj === 'object' ? obj.value : obj
+            }
+          }
+          ioValuesRef.current = vals
+          setIoCurrentValues(vals)
+        }
+      } catch { /* ignore */ }
+    }
+
+    fetchLatest()
+    return () => { active = false }
+  }, [isPLC, deviceId])
+
+  // WebSocket ile PLC canlı veri güncelleme
+  useEffect(() => {
+    if (!isPLC || !deviceId) return
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const url = `${protocol}//${window.location.host}/ws/device/${deviceId}`
+    let active = true
+    let wsObj = null
+    let retryTimer = null
+
+    function connect() {
+      if (!active) return
+      try {
+        wsObj = new WebSocket(url)
+        wsObj.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data)
+            if (msg.type === 'new_data' && msg.record?.data) {
+              const d = msg.record.data
+              const updated = { ...ioValuesRef.current }
+              if (d.digitalInputs) Object.entries(d.digitalInputs).forEach(([k, v]) => { updated[k] = v })
+              if (d.digitalOutputs) Object.entries(d.digitalOutputs).forEach(([k, v]) => { updated[k] = v })
+              if (d.analogInputs) Object.entries(d.analogInputs).forEach(([k, v]) => { updated[k] = typeof v === 'object' ? v.value : v })
+              if (d.analogOutputs) Object.entries(d.analogOutputs).forEach(([k, v]) => { updated[k] = typeof v === 'object' ? v.value : v })
+              if (d.dataRegisters) Object.entries(d.dataRegisters).forEach(([k, v]) => { updated[k] = typeof v === 'object' ? v.value : v })
+              ioValuesRef.current = updated
+              setIoCurrentValues({ ...updated })
+            }
+          } catch { /* ignore */ }
+        }
+        wsObj.onclose = () => { if (active) retryTimer = setTimeout(connect, 3000) }
+        wsObj.onerror = () => wsObj.close()
+      } catch {
+        if (active) retryTimer = setTimeout(connect, 3000)
       }
     }
-    return values
-  }, [isPLC, ioHistory, deviceId])
+
+    connect()
+
+    // Polling fallback — 3 saniyede bir
+    const poll = setInterval(async () => {
+      if (!active) return
+      try {
+        const res = await fetchDeviceData(deviceId, { limit: 1 })
+        const latest = res?.latest?.data
+        if (latest) {
+          const vals = { ...ioValuesRef.current }
+          if (latest.digitalInputs) Object.entries(latest.digitalInputs).forEach(([k, v]) => { vals[k] = v })
+          if (latest.digitalOutputs) Object.entries(latest.digitalOutputs).forEach(([k, v]) => { vals[k] = v })
+          if (latest.analogInputs) Object.entries(latest.analogInputs).forEach(([k, v]) => { vals[k] = typeof v === 'object' ? v.value : v })
+          if (latest.analogOutputs) Object.entries(latest.analogOutputs).forEach(([k, v]) => { vals[k] = typeof v === 'object' ? v.value : v })
+          if (latest.dataRegisters) Object.entries(latest.dataRegisters).forEach(([k, v]) => { vals[k] = typeof v === 'object' ? v.value : v })
+          ioValuesRef.current = vals
+          setIoCurrentValues({ ...vals })
+        }
+      } catch { /* ignore */ }
+    }, 3000)
+
+    return () => {
+      active = false
+      clearInterval(poll)
+      if (retryTimer) clearTimeout(retryTimer)
+      if (wsObj) { wsObj.onclose = null; wsObj.close() }
+    }
+  }, [isPLC, deviceId])
 
   const [plcDirty, setPlcDirty] = useState(false)
   const [showPlcLeaveWarning, setShowPlcLeaveWarning] = useState(false)
