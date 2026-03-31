@@ -288,13 +288,16 @@ function SensorView({ device, deviceId, isAdmin }) {
   )
 }
 
-// Tag input — kendi local state'i var, blur'da parent'a bildirir
+// Tag input — kendi local state'i var, focus kaybetmez
 function TagInput({ addr, value, onChange }) {
   const [local, setLocal] = useState(value)
+  const [focused, setFocused] = useState(false)
   const ref = useRef(null)
 
-  // Dışarıdan gelen value değişirse sync et (kaydet sonrası)
-  useEffect(() => { setLocal(value) }, [value])
+  // Dışarıdan gelen value değişirse sync et — AMA sadece focus yokken
+  useEffect(() => {
+    if (!focused) setLocal(value)
+  }, [value, focused])
 
   return (
     <input
@@ -303,6 +306,8 @@ function TagInput({ addr, value, onChange }) {
       placeholder="Tag ismi girin..."
       className="flex-1 px-2 py-1 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
       value={local}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
       onChange={(e) => {
         setLocal(e.target.value)
         onChange(addr, e.target.value)
@@ -323,7 +328,15 @@ function PlcViewInner({ deviceId, plcIoConfig, modbusConfig, initialTags, isAdmi
   const [renderKey, setRenderKey] = useState(0)
   const [savedSnapshot, setSavedSnapshot] = useState(() => JSON.stringify(initialTags ?? {}))
   const [saved, setSaved] = useState(false)
-  const [selectedPoint, setSelectedPoint] = useState(null) // { address, tagName, dataType }
+  const [selectedPoint, setSelectedPoint] = useState(null)
+
+  // ioCurrentValues'ı ref'te tut — IoRow re-render'ı tetiklemesin
+  const ioValsRef = useRef(ioCurrentValues)
+  const [ioValsVersion, setIoValsVersion] = useState(0)
+  useEffect(() => {
+    ioValsRef.current = ioCurrentValues
+    setIoValsVersion((v) => v + 1)
+  }, [ioCurrentValues])
 
   const setTag = useCallback((key, val) => {
     tagsRef.current = { ...tagsRef.current, [key]: val }
@@ -351,48 +364,46 @@ function PlcViewInner({ deviceId, plcIoConfig, modbusConfig, initialTags, isAdmi
     setTimeout(() => setSaved(false), 2500)
   }, [onSaveTags, onDirtyChange])
 
-  const IoRow = ({ addr, color, statusColor, dataType: rowDataType }) => {
-    const currentVal = ioCurrentValues?.[addr]
-    const isBit = rowDataType === 'bit'
-    const isOn = currentVal === '1' || currentVal === 'true' || currentVal === true
-    const dotColor = currentVal != null
-      ? (isBit ? (isOn ? 'bg-green-500' : 'bg-red-500') : 'bg-blue-400')
-      : statusColor
+  // IoRow — stable referans, re-render'da yeniden oluşmaz
+  const IoRow = useMemo(() => {
+    return function IoRowInner({ addr, color, statusColor, dataType: rowDataType, version }) {
+      const currentVal = ioValsRef.current?.[addr]
+      const isBit = rowDataType === 'bit'
+      const isOn = currentVal === '1' || currentVal === 'true' || currentVal === true
+      const dotColor = currentVal != null
+        ? (isBit ? (isOn ? 'bg-green-500' : 'bg-red-500') : 'bg-blue-400')
+        : statusColor
 
-    const goToHistory = (e) => {
-      e.stopPropagation()
-      setSelectedPoint({ address: addr, tagName: tagsRef.current[addr] || '', dataType: rowDataType })
+      return (
+        <div className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 transition-colors group">
+          <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotColor}`} />
+          <span className={`font-mono text-xs font-semibold w-12 shrink-0 ${color}`}>{addr}</span>
+          {isAdmin ? (
+            <TagInput addr={addr} value={tagsRef.current[addr] ?? ''} onChange={setTag} />
+          ) : (
+            <span className="flex-1 text-xs text-gray-700">{tagsRef.current[addr] || '—'}</span>
+          )}
+          {currentVal != null && (
+            <span className="shrink-0 ml-1">
+              {isBit ? (
+                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-semibold
+                  ${isOn ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                  {isOn ? 'ON' : 'OFF'}
+                </span>
+              ) : (
+                <span className="text-xs font-mono text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">{currentVal}</span>
+              )}
+            </span>
+          )}
+          <button
+            onClick={(e) => { e.stopPropagation(); setSelectedPoint({ address: addr, tagName: tagsRef.current[addr] || '', dataType: rowDataType }) }}
+            className="text-gray-300 hover:text-blue-500 shrink-0 text-xs ml-auto p-1 rounded hover:bg-blue-50"
+            title="Geçmiş verileri görüntüle"
+          >▶</button>
+        </div>
+      )
     }
-
-    return (
-      <div className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 transition-colors group">
-        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotColor}`} />
-        <span className={`font-mono text-xs font-semibold w-12 shrink-0 ${color}`}>{addr}</span>
-        {isAdmin ? (
-          <TagInput addr={addr} value={tagsRef.current[addr] ?? ''} onChange={setTag} />
-        ) : (
-          <span className="flex-1 text-xs text-gray-700">{tagsRef.current[addr] || '—'}</span>
-        )}
-        {currentVal != null && (
-          <span className="shrink-0 ml-1">
-            {isBit ? (
-              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-semibold
-                ${isOn ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
-                {isOn ? 'ON' : 'OFF'}
-              </span>
-            ) : (
-              <span className="text-xs font-mono text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">{currentVal}</span>
-            )}
-          </span>
-        )}
-        <button
-          onClick={goToHistory}
-          className="text-gray-300 hover:text-blue-500 shrink-0 text-xs ml-auto p-1 rounded hover:bg-blue-50"
-          title="Geçmiş verileri görüntüle"
-        >▶</button>
-      </div>
-    )
-  }
+  }, [isAdmin, setTag]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const plcContent = (
     <div className="space-y-5">
@@ -440,7 +451,7 @@ function PlcViewInner({ deviceId, plcIoConfig, modbusConfig, initialTags, isAdmi
           {isAdmin && <p className="text-xs text-gray-400 mb-2 italic">🟢 ON · 🔴 OFF — backend bağlandığında aktif olacak</p>}
           <div className="space-y-0.5">
             {xAddrs.length === 0 && <span className="text-xs text-gray-400">Tanımlı giriş yok</span>}
-            {xAddrs.map((addr) => <IoRow key={`${addr}-${renderKey}`} addr={addr} color="text-blue-700" statusColor="bg-gray-300" dataType="bit" />)}
+            {xAddrs.map((addr) => <IoRow key={`${addr}-${renderKey}`} version={ioValsVersion} addr={addr} color="text-blue-700" statusColor="bg-gray-300" dataType="bit" />)}
           </div>
         </div>
 
@@ -456,7 +467,7 @@ function PlcViewInner({ deviceId, plcIoConfig, modbusConfig, initialTags, isAdmi
           </div>
           <div className="space-y-0.5">
             {yAddrs.length === 0 && <span className="text-xs text-gray-400">Tanımlı çıkış yok</span>}
-            {yAddrs.map((addr) => <IoRow key={`${addr}-${renderKey}`} addr={addr} color="text-green-700" statusColor="bg-gray-300" dataType="bit" />)}
+            {yAddrs.map((addr) => <IoRow key={`${addr}-${renderKey}`} version={ioValsVersion} addr={addr} color="text-green-700" statusColor="bg-gray-300" dataType="bit" />)}
           </div>
         </div>
 

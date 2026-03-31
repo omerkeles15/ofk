@@ -59,7 +59,9 @@ export const useCompanyStore = create((set, get) => ({
   },
 
   updateDevice: async (companyId, locationId, deviceId, data) => {
-    // Genel güncelleme — ioTags gibi alanlar için local state güncelle
+    // Backend'e kaydet
+    await axios.put(`${API}/companies/${companyId}/locations/${locationId}/devices/${deviceId}`, data)
+    // Local state güncelle
     set((s) => ({
       companies: s.companies.map((c) =>
         c.id === companyId

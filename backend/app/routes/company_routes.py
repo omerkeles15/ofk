@@ -291,3 +291,31 @@ async def toggle_device(cid: int, lid: int, device_id: str, db: AsyncSession = D
     await db.commit()
     await cache_delete("companies:*")
     return {"id": dev.id, "status": dev.status}
+
+
+@router.put("/companies/{cid}/locations/{lid}/devices/{device_id}")
+async def update_device(cid: int, lid: int, device_id: str, body: DeviceUpdateSchema, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Device).where(Device.id == device_id))
+    dev = result.scalar_one_or_none()
+    if not dev:
+        raise HTTPException(404, "Cihaz bulunamadı")
+    if body.tagName is not None:
+        dev.tag_name = body.tagName
+    if body.deviceType is not None:
+        dev.device_type = body.deviceType
+    if body.subtype is not None:
+        dev.subtype = body.subtype
+    if body.unit is not None:
+        dev.unit = body.unit
+    if body.status is not None:
+        dev.status = body.status
+    if body.modbusConfig is not None:
+        dev.modbus_config = body.modbusConfig
+    if body.plcIoConfig is not None:
+        dev.plc_io_config = body.plcIoConfig
+    if body.ioTags is not None:
+        dev.io_tags = body.ioTags
+    await db.commit()
+    await db.refresh(dev)
+    await cache_delete("companies:*")
+    return _device_to_dict(dev)

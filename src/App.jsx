@@ -22,7 +22,17 @@ import Unauthorized from './pages/Unauthorized'
 export default function App() {
   const fetchCompanies = useCompanyStore((s) => s.fetchCompanies)
   const fetchUsers = useUserStore((s) => s.fetchUsers)
-  useEffect(() => { fetchCompanies(); fetchUsers() }, [fetchCompanies, fetchUsers])
+
+  // İlk yükleme + 10 saniyede bir güncelleme (çoklu cihaz/tarayıcı senkronizasyonu)
+  useEffect(() => {
+    fetchCompanies()
+    fetchUsers()
+    const interval = setInterval(() => {
+      fetchCompanies()
+      fetchUsers()
+    }, 10000)
+    return () => clearInterval(interval)
+  }, [fetchCompanies, fetchUsers])
 
   return (
     <Routes>
