@@ -43,7 +43,8 @@ export default function AdminCompanyDetail() {
   const [locForm, setLocForm] = useState({ name: '' })
   const [devForm, setDevForm] = useState({ tagName: '', deviceType: '', subtype: '', unit: '', modbusConfig: null, plcIoConfig: null })
   const [devError, setDevError] = useState('')
-  const [toggleTarget, setToggleTarget] = useState(null) // { device, locId } — onay bekleyen toggle
+  const [toggleTarget, setToggleTarget] = useState(null)
+  const [deleteDevTarget, setDeleteDevTarget] = useState(null) // { device, locId } — onay bekleyen toggle
 
   const locValidationRules = useMemo(() => ({
     name: (v) => (!v || !v.trim()) ? 'Lokasyon adı boş bırakılamaz' : null,
@@ -164,7 +165,7 @@ export default function AdminCompanyDetail() {
             <Pencil size={14} />
           </button>
           <button
-            onClick={() => deleteDevice(company.id, r._locId, r.id)}
+            onClick={() => setDeleteDevTarget({ device: r, locId: r._locId })}
             className="p-1.5 rounded-lg hover:bg-red-50 text-red-500"
             title="Sil"
           >
@@ -848,6 +849,21 @@ export default function AdminCompanyDetail() {
             setToggleTarget(null)
           }}
           onCancel={() => setToggleTarget(null)}
+        />
+      )}
+
+      {/* Cihaz Silme Onay Dialogu */}
+      {deleteDevTarget && (
+        <ConfirmDialog
+          title="Cihazı Sil"
+          message={`"${deleteDevTarget.device.tagName}" (${deleteDevTarget.device.id}) cihazını ve tüm geçmiş verilerini silmek istediğinize emin misiniz? Bu işlem geri alınamaz.`}
+          requirePassword
+          onPasswordVerify={(pw) => pw === 'admin123'}
+          onConfirm={() => {
+            deleteDevice(company.id, deleteDevTarget.locId, deleteDevTarget.device.id)
+            setDeleteDevTarget(null)
+          }}
+          onCancel={() => setDeleteDevTarget(null)}
         />
       )}
     </AppLayout>

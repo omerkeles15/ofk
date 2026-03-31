@@ -93,6 +93,30 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_ioph_da ON io_point_history(device_id, address);
         CREATE INDEX IF NOT EXISTS idx_ioph_dat ON io_point_history(device_id, address, timestamp DESC);
+
+        CREATE TABLE IF NOT EXISTS alarm_configs (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id   TEXT NOT NULL,
+            address     TEXT NOT NULL,
+            min_value   REAL,
+            max_value   REAL,
+            enabled     INTEGER DEFAULT 1,
+            created_at  TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ac_da ON alarm_configs(device_id, address);
+
+        CREATE TABLE IF NOT EXISTS alarm_logs (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id   TEXT NOT NULL,
+            address     TEXT NOT NULL,
+            value       TEXT NOT NULL,
+            alarm_type  TEXT NOT NULL,
+            limit_value REAL,
+            timestamp   TEXT,
+            received_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_al_da ON alarm_logs(device_id, address);
+        CREATE INDEX IF NOT EXISTS idx_al_dat ON alarm_logs(device_id, address, timestamp DESC);
     """)
     conn.close()
 
@@ -605,7 +629,21 @@ async def receive_device_data(payload: DeviceDataPayload):
     row_id = cur.lastrowid
     conn.commit()
 
-    # ── 4. PLC I/O nokta geçmişi kaydet ──────────────────────
+    # ── 4. Alarm kontrolü ─────────────────────────────────────
+    alarm_conn = get_db()
+    if dev_type == "sensor" and data_to_store:
+        sensor_val = data_to_store.get("value") if isinstance(data_to_store, dict) else None
+        if sensor_val:
+            _check_and_log_alarms(alarm_conn, payload.deviceId, "value", sensor_val, ts, now)
+    if dev_type == "plc" and data_to_store:
+        for section in ("analogInputs", "analogOutputs", "dataRegisters"):
+            for addr, obj in (data_to_store.get(section) or {}).items():
+                val = obj.get("value", "0") if isinstance(obj, dict) else str(obj)
+                _check_and_log_alarms(alarm_conn, payload.deviceId, addr, val, ts, now)
+    alarm_conn.commit()
+    alarm_conn.close()
+
+    # ── 5. PLC I/O nokta geçmişi kaydet ──────────────────────
     if dev_type == "plc" and data_to_store:
         io_conn = get_db()
         io_records = []
@@ -861,6 +899,131 @@ def clear_io_point_history(device_id: str, address: str):
     deleted = cur.rowcount
     conn.close()
     return {"ok": True, "deleted": deleted}
+
+# ── Alarm API ─────────────────────────────────────────────────
+class AlarmConfigBody(BaseModel):
+    minValue: Optional[float] = None
+    maxValue: Optional[float] = None
+    enabled: Optional[bool] = True
+
+@app.get("/api/alarm-config/{device_id}/{address}")
+def get_alarm_config(device_id: str, address: str):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM alarm_configs WHERE device_id=? AND address=?", (device_id, address)).fetchone()
+    conn.close()
+    if not row:
+        return {"deviceId": device_id, "address": address, "minValue": None, "maxValue": None, "enabled": True}
+    return {"deviceId": row["device_id"], "address": row["address"], "minValue": row["min_value"], "maxValue": row["max_value"], "enabled": bool(row["enabled"])}
+
+@app.put("/api/alarm-config/{device_id}/{address}")
+def set_alarm_config(device_id: str, address: str, body: AlarmConfigBody):
+    conn = get_db()
+    existing = conn.execute("SELECT id FROM alarm_configs WHERE device_id=? AND address=?", (device_id, address)).fetchone()
+    if existing:
+        conn.execute("UPDATE alarm_configs SET min_value=?, max_value=?, enabled=? WHERE device_id=? AND address=?",
+                     (body.minValue, body.maxValue, 1 if body.enabled else 0, device_id, address))
+    else:
+        conn.execute("INSERT INTO alarm_configs (device_id, address, min_value, max_value, enabled, created_at) VALUES (?,?,?,?,?,?)",
+                     (device_id, address, body.minValue, body.maxValue, 1 if body.enabled else 0, datetime.now().isoformat()))
+    conn.commit()
+
+    # Mevcut alarm kayıtlarını temizle ve geçmiş verileri tarayarak yeniden oluştur
+    conn.execute("DELETE FROM alarm_logs WHERE device_id=? AND address=?", (device_id, address))
+
+    if body.enabled and (body.minValue is not None or body.maxValue is not None):
+        now = datetime.now().isoformat()
+        # Sensör verisi için address="value" — device_data tablosundan tara
+        if address == "value":
+            rows = conn.execute(
+                "SELECT data_json, timestamp, received_at FROM device_data WHERE device_id=? ORDER BY timestamp",
+                (device_id,)
+            ).fetchall()
+            for r in rows:
+                try:
+                    data = json.loads(r["data_json"]) if r["data_json"] else {}
+                    val = float(data.get("value", 0))
+                    ts = r["timestamp"] or r["received_at"]
+                    ra = r["received_at"] or now
+                    if body.maxValue is not None and val > body.maxValue:
+                        conn.execute("INSERT INTO alarm_logs (device_id,address,value,alarm_type,limit_value,timestamp,received_at) VALUES (?,?,?,?,?,?,?)",
+                                     (device_id, address, str(val), "max", body.maxValue, ts, ra))
+                    if body.minValue is not None and val < body.minValue:
+                        conn.execute("INSERT INTO alarm_logs (device_id,address,value,alarm_type,limit_value,timestamp,received_at) VALUES (?,?,?,?,?,?,?)",
+                                     (device_id, address, str(val), "min", body.minValue, ts, ra))
+                except Exception:
+                    pass
+        else:
+            # PLC I/O noktası — io_point_history tablosundan tara
+            rows = conn.execute(
+                "SELECT value, timestamp, received_at FROM io_point_history WHERE device_id=? AND address=? ORDER BY timestamp",
+                (device_id, address)
+            ).fetchall()
+            for r in rows:
+                try:
+                    val = float(r["value"])
+                    ts = r["timestamp"] or r["received_at"]
+                    ra = r["received_at"] or now
+                    if body.maxValue is not None and val > body.maxValue:
+                        conn.execute("INSERT INTO alarm_logs (device_id,address,value,alarm_type,limit_value,timestamp,received_at) VALUES (?,?,?,?,?,?,?)",
+                                     (device_id, address, str(val), "max", body.maxValue, ts, ra))
+                    if body.minValue is not None and val < body.minValue:
+                        conn.execute("INSERT INTO alarm_logs (device_id,address,value,alarm_type,limit_value,timestamp,received_at) VALUES (?,?,?,?,?,?,?)",
+                                     (device_id, address, str(val), "min", body.minValue, ts, ra))
+                except Exception:
+                    pass
+
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+@app.get("/api/alarm-logs/{device_id}/{address}")
+def get_alarm_logs(device_id: str, address: str, limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
+                   from_ts: Optional[str] = Query(None, alias="from"), to_ts: Optional[str] = Query(None, alias="to")):
+    conn = get_db()
+    sql = "SELECT * FROM alarm_logs WHERE device_id=? AND address=?"
+    count_sql = "SELECT COUNT(*) FROM alarm_logs WHERE device_id=? AND address=?"
+    params = [device_id, address]
+    if from_ts:
+        sql += " AND timestamp>=?"
+        count_sql += " AND timestamp>=?"
+        params.append(from_ts)
+    if to_ts:
+        sql += " AND timestamp<=?"
+        count_sql += " AND timestamp<=?"
+        params.append(to_ts)
+    filtered = conn.execute(count_sql, params).fetchone()[0]
+    total = conn.execute("SELECT COUNT(*) FROM alarm_logs WHERE device_id=? AND address=?", (device_id, address)).fetchone()[0]
+    sql += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+    rows = conn.execute(sql, params + [limit, offset]).fetchall()
+    conn.close()
+    return {
+        "records": [{"id": r["id"], "value": r["value"], "alarmType": r["alarm_type"], "limitValue": r["limit_value"], "timestamp": r["timestamp"], "receivedAt": r["received_at"]} for r in rows],
+        "total": total, "filtered": filtered, "limit": limit, "offset": offset,
+    }
+
+@app.delete("/api/alarm-logs/{device_id}/{address}")
+def clear_alarm_logs(device_id: str, address: str):
+    conn = get_db()
+    cur = conn.execute("DELETE FROM alarm_logs WHERE device_id=? AND address=?", (device_id, address))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "deleted": cur.rowcount}
+
+def _check_and_log_alarms(conn, device_id, address, value_str, timestamp, now):
+    """Alarm limitlerini kontrol et, aşılmışsa alarm kaydı oluştur."""
+    try:
+        val = float(value_str)
+    except (ValueError, TypeError):
+        return
+    row = conn.execute("SELECT * FROM alarm_configs WHERE device_id=? AND address=? AND enabled=1", (device_id, address)).fetchone()
+    if not row:
+        return
+    if row["max_value"] is not None and val > row["max_value"]:
+        conn.execute("INSERT INTO alarm_logs (device_id, address, value, alarm_type, limit_value, timestamp, received_at) VALUES (?,?,?,?,?,?,?)",
+                     (device_id, address, value_str, "max", row["max_value"], timestamp, now))
+    if row["min_value"] is not None and val < row["min_value"]:
+        conn.execute("INSERT INTO alarm_logs (device_id, address, value, alarm_type, limit_value, timestamp, received_at) VALUES (?,?,?,?,?,?,?)",
+                     (device_id, address, value_str, "min", row["min_value"], timestamp, now))
 
 # ── WebSocket — Canlı Veri İzleme ────────────────────────────
 @app.websocket("/ws/device/{device_id}")

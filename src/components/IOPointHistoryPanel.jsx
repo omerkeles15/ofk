@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ArrowLeft, Trash2, Filter, RefreshCw, TrendingUp } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts'
 import ConfirmDialog from './ConfirmDialog'
+import AlarmPanel from './AlarmPanel'
 import axios from 'axios'
 
 const PAGE_SIZE_OPTIONS = [50, 100, 200]
@@ -176,6 +177,21 @@ export default function IOPointHistoryPanel({ deviceId, address, tagName, dataTy
             )}
           </ResponsiveContainer>
         </div>
+      )}
+
+      {/* Alarm Paneli — dijital olmayan noktalar için */}
+      {!isBit && (
+        <AlarmPanel
+          deviceId={deviceId}
+          address={address}
+          label={`${address}${tagName ? ` — ${tagName}` : ''}`}
+          isAdmin={isAdmin}
+          unit=""
+          chartData={records.length > 0 ? [...records].reverse().map((r) => ({
+            time: new Date(r.timestamp).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            value: parseFloat(r.value) || 0,
+          })) : []}
+        />
       )}
 
       <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm">

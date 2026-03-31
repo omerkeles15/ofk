@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 import json
 from app.database import get_db
@@ -275,6 +275,12 @@ async def delete_device(cid: int, lid: int, device_id: str, db: AsyncSession = D
     dev = result.scalar_one_or_none()
     if not dev:
         raise HTTPException(404)
+    # Cihazla ilgili tüm verileri sil
+    from app.models import DeviceData, IOPointHistory, AlarmConfig, AlarmLog
+    await db.execute(delete(DeviceData).where(DeviceData.device_id == device_id))
+    await db.execute(delete(IOPointHistory).where(IOPointHistory.device_id == device_id))
+    await db.execute(delete(AlarmConfig).where(AlarmConfig.device_id == device_id))
+    await db.execute(delete(AlarmLog).where(AlarmLog.device_id == device_id))
     await db.delete(dev)
     await db.commit()
     await cache_delete("companies:*")

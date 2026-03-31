@@ -83,6 +83,29 @@ class IOPointHistory(Base):
     received_at = Column(DateTime, server_default=func.now())
 
 
+class AlarmConfig(Base):
+    __tablename__ = "alarm_configs"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    device_id = Column(String(20), nullable=False)
+    address = Column(String(20), nullable=False)
+    min_value = Column(Float)
+    max_value = Column(Float)
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class AlarmLog(Base):
+    __tablename__ = "alarm_logs"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    device_id = Column(String(20), nullable=False, index=True)
+    address = Column(String(20), nullable=False)
+    value = Column(String(50), nullable=False)
+    alarm_type = Column(String(10), nullable=False)
+    limit_value = Column(Float)
+    timestamp = Column(String(50))
+    received_at = Column(DateTime, server_default=func.now())
+
+
 class User(Base):
     __tablename__ = "users"
 

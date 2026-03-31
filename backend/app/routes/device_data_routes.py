@@ -163,7 +163,42 @@ async def receive_device_data(payload: DeviceDataPayload, db: AsyncSession = Dep
                     io_db.add(IOPointHistory(device_id=payload.deviceId, address=addr, value=val, timestamp=ts))
             await io_db.commit()
 
-    # 3. WebSocket push — anında tüm izleyicilere
+    # 3. Alarm kontrolü
+    from app.models import AlarmConfig, AlarmLog
+    from app.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as alarm_db:
+        if device.device_type == "sensor" and data_to_store:
+            val_str = data_to_store.get("value") if isinstance(data_to_store, dict) else None
+            if val_str:
+                try:
+                    val = float(val_str)
+                    cfg_r = await alarm_db.execute(select(AlarmConfig).where(AlarmConfig.device_id == payload.deviceId, AlarmConfig.address == "value", AlarmConfig.enabled == True))
+                    cfg = cfg_r.scalar_one_or_none()
+                    if cfg:
+                        if cfg.max_value is not None and val > cfg.max_value:
+                            alarm_db.add(AlarmLog(device_id=payload.deviceId, address="value", value=val_str, alarm_type="max", limit_value=cfg.max_value, timestamp=ts))
+                        if cfg.min_value is not None and val < cfg.min_value:
+                            alarm_db.add(AlarmLog(device_id=payload.deviceId, address="value", value=val_str, alarm_type="min", limit_value=cfg.min_value, timestamp=ts))
+                except Exception:
+                    pass
+        if device.device_type == "plc" and data_to_store:
+            for section in ("analogInputs", "analogOutputs", "dataRegisters"):
+                for addr, obj in (data_to_store.get(section) or {}).items():
+                    val_str = obj.get("value", "0") if isinstance(obj, dict) else str(obj)
+                    try:
+                        val = float(val_str)
+                        cfg_r = await alarm_db.execute(select(AlarmConfig).where(AlarmConfig.device_id == payload.deviceId, AlarmConfig.address == addr, AlarmConfig.enabled == True))
+                        cfg = cfg_r.scalar_one_or_none()
+                        if cfg:
+                            if cfg.max_value is not None and val > cfg.max_value:
+                                alarm_db.add(AlarmLog(device_id=payload.deviceId, address=addr, value=val_str, alarm_type="max", limit_value=cfg.max_value, timestamp=ts))
+                            if cfg.min_value is not None and val < cfg.min_value:
+                                alarm_db.add(AlarmLog(device_id=payload.deviceId, address=addr, value=val_str, alarm_type="min", limit_value=cfg.min_value, timestamp=ts))
+                    except Exception:
+                        pass
+        await alarm_db.commit()
+
+    # 4. WebSocket push — anında tüm izleyicilere
     ws_data = {
         "type": "new_data",
         "record": {

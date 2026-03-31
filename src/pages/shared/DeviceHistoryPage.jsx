@@ -6,6 +6,7 @@ import AppLayout from '../../components/Layout/AppLayout'
 import Modal from '../../components/Modal'
 import DeviceJsonInfoModal from '../../components/DeviceJsonInfoModal'
 import IOPointHistoryPanel from '../../components/IOPointHistoryPanel'
+import AlarmPanel from '../../components/AlarmPanel'
 import { useCompanyStore } from '../../features/company/companyStore'
 import { useAuth } from '../../hooks/useAuth'
 import { getDeltaXAddresses, getDeltaYAddresses, DATA_TYPES } from '../../features/device/deviceCatalog'
@@ -262,6 +263,19 @@ function SensorView({ device, deviceId, isAdmin }) {
           </ResponsiveContainer>
         </div>
       )}
+
+      {/* Alarm Paneli */}
+      <AlarmPanel
+        deviceId={deviceId}
+        address="value"
+        label={device.tagName}
+        isAdmin={isAdmin}
+        unit={device.unit}
+        chartData={records.length > 0 ? [...records].reverse().map((r) => ({
+          time: new Date(r.timestamp || r.receivedAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          value: parseFloat(r.data?.value ?? 0),
+        })) : []}
+      />
 
       <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm">
         <table className="w-full text-sm">
