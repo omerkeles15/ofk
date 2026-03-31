@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { ArrowLeft, Trash2, Filter, RefreshCw, TrendingUp } from 'lucide-react'
+import { ArrowLeft, Trash2, Filter, RefreshCw, TrendingUp, Download } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts'
 import ConfirmDialog from './ConfirmDialog'
 import AlarmPanel from './AlarmPanel'
@@ -84,6 +84,18 @@ export default function IOPointHistoryPanel({ deviceId, address, tagName, dataTy
           </h2>
           <p className="text-xs text-gray-400">{getAddressType()} · {deviceId}</p>
         </div>
+        <button
+          onClick={() => {
+            const link = document.createElement('a')
+            link.href = `/api/export/${deviceId}`
+            link.download = `${deviceId}_export.xlsx`
+            link.click()
+          }}
+          className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-green-50 hover:bg-green-100 text-green-600 text-xs font-medium transition-colors shrink-0"
+          title="Verileri Excel olarak indir"
+        >
+          <Download size={14} /> Excel
+        </button>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">

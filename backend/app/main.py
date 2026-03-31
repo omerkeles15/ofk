@@ -8,7 +8,7 @@ import os
 
 from app.config import get_settings
 from app.database import init_db
-from app.routes import auth_routes, company_routes, device_data_routes, user_routes, alarm_routes
+from app.routes import auth_routes, company_routes, device_data_routes, user_routes, alarm_routes, export_routes, report_routes
 from app.seed import seed_default_users
 from app.ws_manager import manager
 from app.batch_worker import batch_worker_loop
@@ -49,6 +49,8 @@ app.include_router(company_routes.router)
 app.include_router(device_data_routes.router)
 app.include_router(user_routes.router)
 app.include_router(alarm_routes.router)
+app.include_router(export_routes.router)
+app.include_router(report_routes.router)
 
 
 # ── WebSocket — prefix'siz, doğrudan app'e bağlı ─────────────

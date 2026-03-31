@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Trash2, Filter, AlertTriangle, BarChart2, Cpu, HelpCircle, RefreshCw, TrendingUp } from 'lucide-react'
+import { ArrowLeft, Trash2, Filter, AlertTriangle, BarChart2, Cpu, HelpCircle, RefreshCw, TrendingUp, Download, FileText } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts'
 import AppLayout from '../../components/Layout/AppLayout'
 import Modal from '../../components/Modal'
@@ -847,6 +847,25 @@ export default function DeviceHistoryPage({ menuItems }) {
             </p>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => {
+                const link = document.createElement('a')
+                link.href = `/api/export/${deviceId}`
+                link.download = `${deviceId}_export.xlsx`
+                link.click()
+              }}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-green-50 hover:bg-green-100 text-green-600 text-xs font-medium transition-colors"
+              title="Verileri Excel olarak indir"
+            >
+              <Download size={14} /> Excel
+            </button>
+            <button
+              onClick={() => window.open(`/api/report/${deviceId}`, '_blank')}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs font-medium transition-colors"
+              title="Günlük rapor oluştur"
+            >
+              <FileText size={14} /> Rapor
+            </button>
             <button
               onClick={() => setShowJsonModal(true)}
               className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-blue-600 transition-colors"
