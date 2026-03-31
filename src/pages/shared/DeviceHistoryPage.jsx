@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Trash2, Filter, AlertTriangle, BarChart2, Cpu, HelpCircle, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Trash2, Filter, AlertTriangle, BarChart2, Cpu, HelpCircle, RefreshCw, TrendingUp } from 'lucide-react'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts'
 import AppLayout from '../../components/Layout/AppLayout'
 import Modal from '../../components/Modal'
 import DeviceJsonInfoModal from '../../components/DeviceJsonInfoModal'
@@ -95,8 +96,16 @@ function SensorView({ device, deviceId, isAdmin }) {
               const r = msg.record
               const ts = r.timestamp || r.receivedAt || ''
               const f = filterRef.current
+
+              // Toplam kayıt her zaman artar
+              setTotal((prev) => prev + 1)
+              setLatest(r)
+
+              // Filtre kontrolü — filtre dışındaysa tabloya/grafiğe ekleme
               if (f.from && ts < f.from) return
               if (f.to && ts > f.to) return
+
+              setFiltered((prev) => prev + 1)
 
               // Deduplicate: aynı timestamp + deviceId varsa ekleme
               setRecords((prev) => {
@@ -104,9 +113,6 @@ function SensorView({ device, deviceId, isAdmin }) {
                 if (exists) return prev
                 return [r, ...prev].slice(0, pageSizeRef.current)
               })
-              setTotal((prev) => prev + 1)
-              setFiltered((prev) => prev + 1)
-              setLatest(r)
             }
           } catch { /* ignore */ }
         }
@@ -222,6 +228,41 @@ function SensorView({ device, deviceId, isAdmin }) {
           )}
         </div>
       </div>
+
+      {/* Sensör Grafiği */}
+      {records.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <TrendingUp size={16} className="text-blue-500" />
+            <p className="text-sm font-semibold text-gray-700">Canlı Veri Grafiği</p>
+            <span className="text-xs text-gray-400 ml-auto">{device.unit}</span>
+          </div>
+          <ResponsiveContainer width="100%" height={280}>
+            <AreaChart data={[...records].reverse().map((r) => ({
+              time: new Date(r.timestamp || r.receivedAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+              value: parseFloat(r.data?.value ?? 0),
+              fullTime: new Date(r.timestamp || r.receivedAt).toLocaleString('tr-TR'),
+            }))}>
+              <defs>
+                <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#9ca3af' }} interval="preserveStartEnd" />
+              <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} width={50} />
+              <Tooltip
+                contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: '12px' }}
+                labelFormatter={(_, payload) => payload?.[0]?.payload?.fullTime || ''}
+                formatter={(value) => [`${value} ${device.unit}`, 'Değer']}
+              />
+              <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} fill="url(#colorValue)" dot={false} activeDot={{ r: 4, fill: '#3b82f6' }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
       <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm">
         <table className="w-full text-sm">
           <thead>

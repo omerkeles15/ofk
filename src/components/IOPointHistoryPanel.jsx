@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { ArrowLeft, Trash2, Filter, RefreshCw } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { ArrowLeft, Trash2, Filter, RefreshCw, TrendingUp } from 'lucide-react'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts'
 import ConfirmDialog from './ConfirmDialog'
 import axios from 'axios'
 
@@ -134,6 +135,48 @@ export default function IOPointHistoryPanel({ deviceId, address, tagName, dataTy
           </div>
         ))}
       </div>
+
+      {/* Grafik */}
+      {records.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <TrendingUp size={16} className={isBit ? 'text-green-500' : 'text-purple-500'} />
+            <p className="text-sm font-semibold text-gray-700">{address} Geçmiş Grafiği</p>
+          </div>
+          <ResponsiveContainer width="100%" height={220}>
+            {isBit ? (
+              <BarChart data={[...records].reverse().map((r) => ({
+                time: new Date(r.timestamp).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                value: r.value === '1' ? 1 : 0,
+                label: r.value === '1' ? 'ON' : 'OFF',
+              }))}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#9ca3af' }} interval="preserveStartEnd" />
+                <YAxis domain={[0, 1]} ticks={[0, 1]} tickFormatter={(v) => v === 1 ? 'ON' : 'OFF'} tick={{ fontSize: 10, fill: '#9ca3af' }} width={40} />
+                <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', fontSize: '12px' }} formatter={(v) => [v === 1 ? 'ON' : 'OFF', 'Durum']} />
+                <Bar dataKey="value" fill="#22c55e" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            ) : (
+              <AreaChart data={[...records].reverse().map((r) => ({
+                time: new Date(r.timestamp).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                value: parseFloat(r.value) || 0,
+              }))}>
+                <defs>
+                  <linearGradient id={`grad-${address}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#9ca3af' }} interval="preserveStartEnd" />
+                <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} width={50} />
+                <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', fontSize: '12px' }} formatter={(v) => [v, 'Değer']} />
+                <Area type="monotone" dataKey="value" stroke="#8b5cf6" strokeWidth={2} fill={`url(#grad-${address})`} dot={false} activeDot={{ r: 4 }} />
+              </AreaChart>
+            )}
+          </ResponsiveContainer>
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm">
         <table className="w-full text-sm">

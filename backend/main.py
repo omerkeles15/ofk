@@ -574,6 +574,18 @@ async def receive_device_data(payload: DeviceDataPayload):
 
     # ── 3. Veriyi kaydet ──────────────────────────────────────
     now = datetime.now().isoformat()
+
+    # Timestamp'ı lokal saate normalize et
+    ts = payload.timestamp or now
+    try:
+        parsed_ts = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+        if parsed_ts.tzinfo is not None:
+            from datetime import timezone, timedelta
+            local_tz = timezone(timedelta(hours=3))
+            ts = parsed_ts.astimezone(local_tz).strftime('%Y-%m-%dT%H:%M:%S.%f')
+    except Exception:
+        pass
+
     conn = get_db()
     cur = conn.execute(
         """INSERT INTO device_data
@@ -583,7 +595,7 @@ async def receive_device_data(payload: DeviceDataPayload):
             payload.deviceId,
             payload.companyId,
             payload.locationId,
-            payload.timestamp,
+            ts,
             payload.type,
             payload.subtype,
             json.dumps(data_to_store, ensure_ascii=False) if data_to_store else None,
@@ -596,7 +608,6 @@ async def receive_device_data(payload: DeviceDataPayload):
     # ── 4. PLC I/O nokta geçmişi kaydet ──────────────────────
     if dev_type == "plc" and data_to_store:
         io_conn = get_db()
-        ts = payload.timestamp or now
         io_records = []
         for section in ("digitalInputs", "digitalOutputs"):
             for addr, val in (data_to_store.get(section) or {}).items():
@@ -623,7 +634,7 @@ async def receive_device_data(payload: DeviceDataPayload):
             "deviceId": payload.deviceId,
             "companyId": payload.companyId,
             "locationId": payload.locationId,
-            "timestamp": payload.timestamp,
+            "timestamp": ts,
             "type": payload.type,
             "subtype": payload.subtype,
             "data": data_to_store,

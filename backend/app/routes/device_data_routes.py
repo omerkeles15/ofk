@@ -117,11 +117,22 @@ async def receive_device_data(payload: DeviceDataPayload, db: AsyncSession = Dep
     # ── Veriyi kaydet ────────────────────────────────────────
     now = datetime.now().isoformat()
 
+    # Timestamp'ı lokal saate normalize et (UTC offset varsa çevir)
+    ts = payload.timestamp or now
+    try:
+        from datetime import timezone, timedelta
+        parsed = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+        if parsed.tzinfo is not None:
+            local_tz = timezone(timedelta(hours=3))  # Türkiye UTC+3
+            ts = parsed.astimezone(local_tz).strftime('%Y-%m-%dT%H:%M:%S.%f')
+    except Exception:
+        pass
+
     record = {
         "device_id": payload.deviceId,
         "company_id": payload.companyId,
         "location_id": payload.locationId,
-        "timestamp": payload.timestamp,
+        "timestamp": ts,
         "type": payload.type,
         "subtype": payload.subtype,
         "data_json": json.dumps(data_to_store, ensure_ascii=False) if data_to_store else None,
@@ -142,7 +153,6 @@ async def receive_device_data(payload: DeviceDataPayload, db: AsyncSession = Dep
     if device.device_type == "plc" and data_to_store:
         from app.models import IOPointHistory
         from app.database import AsyncSessionLocal
-        ts = payload.timestamp or now
         async with AsyncSessionLocal() as io_db:
             for section in ("digitalInputs", "digitalOutputs"):
                 for addr, val in (data_to_store.get(section) or {}).items():
@@ -160,7 +170,7 @@ async def receive_device_data(payload: DeviceDataPayload, db: AsyncSession = Dep
             "deviceId": payload.deviceId,
             "companyId": payload.companyId,
             "locationId": payload.locationId,
-            "timestamp": payload.timestamp,
+            "timestamp": ts,
             "type": payload.type,
             "subtype": payload.subtype,
             "data": data_to_store,
